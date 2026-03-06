@@ -61,7 +61,7 @@ let appLogLevel = process.env.NODE_ENV !== "production" ? levels.debug : levels.
 let useSyslogPrefix = !process.stdout.isTTY;
 const useColors = process.stdout.hasColors && process.stdout.hasColors();
 
-// copying here to rstrict colors and optimize speed
+// copying here to restrict colors and optimize speed
 const colors = {
     black: util.inspect.colors.black,
     red: util.inspect.colors.redBright,
