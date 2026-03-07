@@ -33,4 +33,3 @@ fastify.log.info(`Worker ${process.pid} shutting down due to inactivity.`);
 ## License
 
 [MIT](./LICENSE)
-
