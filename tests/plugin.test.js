@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { test } from "node:test";
+
 import ylog from "../src/plugin.js";
 
 test("ylog basic logging functions exist and execute", (t) => {
@@ -10,8 +11,12 @@ test("ylog basic logging functions exist and execute", (t) => {
 
     let called = false;
     const originalLog = console.log;
-    t.after(() => { console.log = originalLog; });
-    console.log = () => { called = true; };
+    t.after(() => {
+ console.log = originalLog; 
+});
+    console.log = () => {
+ called = true; 
+};
 
     log.info("test info");
     assert.ok(called, "console.log should have been called");
@@ -22,9 +27,13 @@ test("ylog throttling mechanism works for identical errors", (t) => {
     let errorCalls = 0;
 
     const originalError = console.error;
-    t.after(() => { console.error = originalError; });
+    t.after(() => {
+ console.error = originalError; 
+});
 
-    console.error = () => { errorCalls++; };
+    console.error = () => {
+ errorCalls++; 
+};
 
     const sharedError = new Error("throttle this error");
 
