@@ -207,7 +207,7 @@ class Log {
      *
      * @method fatal
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     fatal = this.throttled("FATAL", levels.error, colors.magenta);
 
@@ -216,7 +216,7 @@ class Log {
      *
      * @method error
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     error = this.throttled("ERROR", levels.error, colors.red);
 
@@ -225,7 +225,7 @@ class Log {
      *
      * @method warn
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     warn = this.throttled("WARN", levels.warn, colors.yellow);
 
@@ -234,7 +234,7 @@ class Log {
      *
      * @method debug
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     info(...args) {
         this.log("INFO", levels.info, args, colors.blue);
@@ -245,7 +245,7 @@ class Log {
      *
      * @method debug
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     debug(...args) {
         this.log("DEBUG", levels.debug, args);
@@ -256,7 +256,7 @@ class Log {
      *
      * @method verbose
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     verbose(...args) {
         this.log("VERBOSE", levels.verbose, args);
@@ -267,7 +267,7 @@ class Log {
      *
      * @method trace
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     trace(...args) {
         this.log("TRACE", levels.verbose, args);
@@ -280,7 +280,7 @@ class Log {
      *
      * @method child
      * @param {String} format util.format placeholder string
-     * @param {String...} [...] optional arguments for util.format
+     * @param {...String} [...] optional arguments for util.format
      */
     child(...args) {
         return this;
