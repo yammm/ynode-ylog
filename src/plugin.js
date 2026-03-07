@@ -38,8 +38,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 // Node.js native dependencies
-import util from "node:util";
 import path from "node:path";
+import util from "node:util";
 
 const levels = {
     error: 0,

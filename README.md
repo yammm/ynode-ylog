@@ -5,8 +5,8 @@ Copyright (c) 2025 Michael Welter <me@mikinho.com>
 [![npm version](https://img.shields.io/npm/v/@ynode/ylog.svg)](https://www.npmjs.com/package/@ynode/ylog)
 [![license](https://img.shields.io/npm/l/@ynode/ylog.svg)](https://github.com/yammm/ynode-ylog/blob/main/LICENSE)
 
-Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works
-with [Fastify](https://www.fastify.io/) or standalone Node.js application.
+Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with
+[Fastify](https://www.fastify.io/) or standalone Node.js application.
 
 ## Installation
 
