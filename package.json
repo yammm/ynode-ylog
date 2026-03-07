@@ -45,8 +45,9 @@
         "lint:fix": "eslint . --fix",
         "ver:preview": "npx autover --no-amend --dry-run --short",
         "ver:apply": "npx autover --guard-unchanged --short",
-        "test": "eslint --no-warn-ignored $(git diff --cached --name-only --diff-filter=ACMRTUXB | tr '\\n' ' ')",
-        "prepublishOnly": "npm test || true",
+        "test": "node --test",
+        "test:staged": "eslint --no-warn-ignored $(git diff --cached --name-only --diff-filter=ACMRTUXB | tr '\\n' ' ')",
+        "prepublishOnly": "npm run lint && npm test",
         "postversion": "git push && git push --tags"
     },
     "publishConfig": {
