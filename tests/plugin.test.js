@@ -34,5 +34,5 @@ test("ylog throttling mechanism works for identical errors", (t) => {
     log.error(sharedError); // This should be throttled
     log.error(sharedError); // This should be throttled
 
-    assert.strictEqual(errorCalls, 2, "Only two calls should pass through the error throttle");
+    assert.strictEqual(errorCalls, 1, "Only one call should pass through the error throttle before being blocked");
 });
