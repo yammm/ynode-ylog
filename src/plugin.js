@@ -81,6 +81,10 @@ class ErrorThrottle {
      */
     static EVICT_INTERVAL = 100;
 
+    /**
+     * @param {number} [max=2] - Maximum calls allowed before suppression.
+     * @param {number} [throttle=30000] - Window duration in milliseconds.
+     */
     constructor(max = 2, throttle = 30 * 1000) {
         this.max = max;
         this.throttle = throttle;
@@ -88,6 +92,12 @@ class ErrorThrottle {
         this.callsSinceEvict = 0;
     }
 
+    /**
+     * Returns true when the given key has exceeded the max call threshold
+     * within the throttle window and should be suppressed.
+     * @param {string} key - Deduplication key (typically error code or message).
+     * @returns {boolean}
+     */
     shouldThrottle(key) {
         const now = Date.now();
 
