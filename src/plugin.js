@@ -75,20 +75,39 @@ const colors = {
 };
 
 class ErrorThrottle {
+    /**
+     * Number of shouldThrottle calls between stale-entry eviction sweeps.
+     * @type {number}
+     */
+    static EVICT_INTERVAL = 100;
+
     constructor(max = 2, throttle = 30 * 1000) {
         this.max = max;
         this.throttle = throttle;
         this.map = new Map();
+        this.callsSinceEvict = 0;
     }
 
     shouldThrottle(key) {
         const now = Date.now();
+
+        // Periodic eviction of stale entries to prevent unbounded Map growth.
+        if (++this.callsSinceEvict >= ErrorThrottle.EVICT_INTERVAL) {
+            this.callsSinceEvict = 0;
+            for (const [k, rec] of this.map) {
+                if (now - rec.last > this.throttle) {
+                    this.map.delete(k);
+                }
+            }
+        }
+
         const rec = this.map.get(key);
         if (!rec || now - rec.last > this.throttle) {
             this.map.set(key, { count: 1, last: now });
             return false;
         }
-        if (++rec.count < this.max) {
+        ++rec.count;
+        if (rec.count <= this.max) {
             rec.last = now;
             return false;
         }
@@ -98,8 +117,18 @@ class ErrorThrottle {
 
 const throttle = new ErrorThrottle();
 
+/**
+ * @param {*} x - Value to check.
+ * @returns {boolean} True when x is an Error instance.
+ */
 const isError = (x) => x instanceof Error;
 
+/**
+ * Extracts a deduplication key from an argument list. Prefers Error.code or
+ * Error.message when an Error is present, otherwise uses the sole argument.
+ * @param {Array<*>} args - Arguments passed to a throttled log method.
+ * @returns {string|null} Throttle key, or null when no key can be derived.
+ */
 const extractKey = (args) => {
     for (const arg of args) {
         if (isError(arg)) {
@@ -112,13 +141,28 @@ const extractKey = (args) => {
     return null;
 };
 
+/**
+ * Zero-pads a number to two digits.
+ * @param {number} n - Number between 0-59.
+ * @returns {string} Two-character string.
+ */
 const pad = (n) => (n < 10 ? "0" + n : n);
 
+/**
+ * Returns a formatted timestamp string (YYYY-MM-DD HH:mm:ss) for log output.
+ * @returns {string}
+ */
 const getTimestamp = () => {
     const d = new Date();
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
+/**
+ * Wraps a string in ANSI color codes when the terminal supports color.
+ * @param {Array<number>} color - ANSI open/close pair from util.inspect.colors.
+ * @param {string} s - String to colorize.
+ * @returns {string} Colorized string, or the original if colors are unavailable.
+ */
 const applyColor = (color, s) => {
     if (!useColors || !color || !s) {
         return s;
@@ -126,17 +170,23 @@ const applyColor = (color, s) => {
     return `\x1B[${color[0]}m${s}\x1B[${color[1]}m`;
 };
 
+/**
+ * Wraps a value in bracket characters. Returns empty string for falsy input.
+ * @param {string} s - Value to wrap.
+ * @param {string} [start="["] - Opening bracket character.
+ * @param {string} [end="]"] - Closing bracket character.
+ * @returns {string}
+ */
 const bracket = (s, start = "[", end = "]") => {
     return s ? `${start}${s}${end}` : "";
 };
 
 class Log {
     /**
-     * @class Log
-     * @constructor
-     *
-     * @param {Object} module The module that is calling us
-     * @param {String} [level] Our logging level, defaults to our app logging level
+     * @param {object} mod - Module metadata (import.meta or { filename }).
+     * @param {object} [options] - Logger options.
+     * @param {string} [options.level] - Named log level (error|warn|info|debug|verbose).
+     * @param {boolean} [options.pid] - Include process PID in output.
      */
     constructor(mod, options = {}) {
         const defaultOptions = {
@@ -149,16 +199,17 @@ class Log {
         this.tag = mod?.filename ? path.basename(mod.filename, ".js") : "unknown";
         this.pid = finalOptions.pid;
 
-        this.level = levels[finalOptions.appLogLevel] ?? defaultOptions.level;
+        this.level = levels[finalOptions.level] ?? defaultOptions.level;
     }
 
     /**
-     * Output with timestamp on stdout in yellow.
+     * Core output method. Routes to the appropriate console stream and applies
+     * timestamp, syslog prefix, color, PID, and module tag formatting.
      *
-     * @method log
-     * @param {Number} level log level: error, warn, info, debug, verbose
-     * @param {Array} args arguments for util.format
-     * @param {Color} [color] the color you want output
+     * @param {string} prefix - Label prefix (INFO, ERROR, etc.).
+     * @param {number} level - Numeric log level threshold.
+     * @param {Array<*>} args - Arguments forwarded to util.format.
+     * @param {Array<number>} [color] - ANSI open/close pair from util.inspect.colors.
      */
     log(prefix, level, args, color) {
         if (level > this.level) {
@@ -189,9 +240,20 @@ class Log {
         console[stdio](message.join(" "));
     }
 
+    /**
+     * Creates a throttled log function that suppresses duplicate messages
+     * after the configured max calls within the throttle window.
+     * @param {string} prefix - Label prefix (FATAL, ERROR, WARN).
+     * @param {number} level - Numeric log level threshold.
+     * @param {Array<number>} color - ANSI color pair.
+     * @returns {Function} Throttled logging function.
+     */
     throttled(prefix, level, color) {
         return (...args) => {
-            if (!args.length || (args.length === 1 && args[0] == null)) {
+            if (
+                !args.length ||
+                (args.length === 1 && (args[0] === null || args[0] === undefined))
+            ) {
                 return;
             }
             const key = extractKey(args);
@@ -202,114 +264,85 @@ class Log {
         };
     }
 
-    /**
-     * Output with timestamp on stderr in red.
-     *
-     * @method fatal
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** Throttled FATAL output on stderr in magenta. @param {...*} args */
     fatal = this.throttled("FATAL", levels.error, colors.magenta);
 
-    /**
-     * Output with timestamp on stderr in red.
-     *
-     * @method error
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** Throttled ERROR output on stderr in red. @param {...*} args */
     error = this.throttled("ERROR", levels.error, colors.red);
 
-    /**
-     * Output with timestamp on stdout in yellow.
-     *
-     * @method warn
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** Throttled WARN output on stderr in yellow. @param {...*} args */
     warn = this.throttled("WARN", levels.warn, colors.yellow);
 
-    /**
-     * Same as Log.info but only prints when in debug mode
-     *
-     * @method debug
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** INFO output on stdout in blue. @param {...*} args */
     info(...args) {
         this.log("INFO", levels.info, args, colors.blue);
     }
 
-    /**
-     * Same as Log.info but only prints when in debug mode
-     *
-     * @method debug
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** DEBUG output on stdout (no color). Only emits at debug level or above. @param {...*} args */
     debug(...args) {
         this.log("DEBUG", levels.debug, args);
     }
 
-    /**
-     * Same as Log.info but only prints when in debug mode
-     *
-     * @method verbose
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** VERBOSE output on stdout (no color). Only emits at verbose level. @param {...*} args */
     verbose(...args) {
         this.log("VERBOSE", levels.verbose, args);
     }
 
-    /**
-     * Same as Log.info but only prints when in debug mode
-     *
-     * @method trace
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
-     */
+    /** Alias for verbose. @param {...*} args */
     trace(...args) {
         this.log("TRACE", levels.verbose, args);
     }
 
     /**
-     * Nothing yet...
-     *
-     * TODO: Detect submodule usage and tag accordingly
-     *
-     * @method child
-     * @param {String} format util.format placeholder string
-     * @param {...String} [...] optional arguments for util.format
+     * Returns the current logger. Placeholder for future child-logger support
+     * with submodule tagging.
+     * @returns {Log}
      */
-    child(...args) {
+    child() {
         return this;
     }
 }
 
-function createLogger(mod, level) {
-    return new Log(mod, level);
+/**
+ * Factory that creates a new Log instance.
+ * @param {object} mod - Module metadata (import.meta or { filename }).
+ * @param {object} [options] - Logger options forwarded to the Log constructor.
+ * @returns {Log}
+ */
+function createLogger(mod, options) {
+    return new Log(mod, options);
 }
 
+/**
+ * Sets the global application log level.
+ * @param {string} level - Named level (error|warn|info|debug|verbose).
+ * @returns {Function} The factory, for chaining.
+ */
 createLogger.loglevel = (level) => {
     appLogLevel = levels[level] ?? appLogLevel;
     return createLogger;
 };
 
+/**
+ * Disables syslog severity prefixes in non-TTY output.
+ * @returns {Function} The factory, for chaining.
+ */
 createLogger.disableSyslogPrefix = () => {
     useSyslogPrefix = false;
     return createLogger;
 };
 
+/**
+ * Numeric log level constants.
+ * @type {object}
+ */
 createLogger.levels = levels;
 createLogger.defaultLevel = appLogLevel;
 
+/**
+ * ErrorThrottle constructor for custom throttle instances.
+ * @type {Function}
+ */
 createLogger.ErrorThrottle = ErrorThrottle;
 
-// Export for ES Modules
 export default createLogger;
-
-// Fallback for CommonJS
-if (typeof module !== "undefined" && typeof module.exports !== "undefined") {
-    module.exports = createLogger;
-}
