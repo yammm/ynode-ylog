@@ -17,7 +17,14 @@
     "keywords": [
         "fastify",
         "log",
-        "logging"
+        "logging",
+        "logger",
+        "color",
+        "console",
+        "terminal",
+        "throttle",
+        "error-suppression",
+        "syslog"
     ],
     "engines": {
         "node": ">=20"
