@@ -20,7 +20,11 @@ export interface Logger {
     debug(...args: unknown[]): void;
     verbose(...args: unknown[]): void;
     trace(...args: unknown[]): void;
-    child(): Logger;
+    /**
+     * Creates a derived logger that prepends the given bindings to every log line.
+     * Compatible with the Fastify/Pino child-logger contract.
+     */
+    child(bindings?: Record<string, unknown>): Logger;
 }
 
 export interface LogLevels {

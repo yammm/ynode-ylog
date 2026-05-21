@@ -45,9 +45,70 @@ describe("basic logging", () => {
         assert.ok(called, "console.error should have been called");
     });
 
-    test("child returns the same logger instance", () => {
+    test("child returns a new derived logger instance", () => {
         const log = ylog({ filename: "test.js" });
-        assert.strictEqual(log.child(), log);
+        const child = log.child();
+        assert.notStrictEqual(child, log, "child should be a new instance");
+        assert.strictEqual(typeof child.info, "function");
+        assert.strictEqual(typeof child.child, "function");
+    });
+
+    test("child(bindings) renders bindings on every log line", (t) => {
+        const log = ylog({ filename: "test.js" });
+        let captured = "";
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = line;
+        };
+
+        const child = log.child({ reqId: "abc", userId: 42 });
+        child.info("hello");
+
+        assert.ok(captured.includes("reqId=abc"), `expected reqId=abc in output, got: ${captured}`);
+        assert.ok(captured.includes("userId=42"), `expected userId=42 in output, got: ${captured}`);
+        assert.ok(captured.includes("hello"), `expected message body in output, got: ${captured}`);
+    });
+
+    test("child(bindings) composes when called repeatedly", (t) => {
+        const log = ylog({ filename: "test.js" });
+        let captured = "";
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = line;
+        };
+
+        const grandchild = log.child({ reqId: "abc" }).child({ stage: "auth" });
+        grandchild.info("hello");
+
+        assert.ok(captured.includes("reqId=abc"), `expected reqId=abc, got: ${captured}`);
+        assert.ok(captured.includes("stage=auth"), `expected stage=auth, got: ${captured}`);
+    });
+
+    test("child does not affect parent bindings", (t) => {
+        const log = ylog({ filename: "test.js" });
+        const parentLines = [];
+        const childLines = [];
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+
+        const child = log.child({ reqId: "abc" });
+
+        console.log = (line) => parentLines.push(line);
+        log.info("parent line");
+
+        console.log = (line) => childLines.push(line);
+        child.info("child line");
+
+        assert.ok(!parentLines[0].includes("reqId="), `parent should not include reqId binding`);
+        assert.ok(childLines[0].includes("reqId=abc"), `child should include reqId binding`);
     });
 });
 
@@ -138,6 +199,49 @@ describe("throttle mechanism", () => {
         log.error(new Error(`distinct-c-${ts}`));
 
         assert.strictEqual(errorCalls, 3, "each distinct error should pass through");
+    });
+
+    test("throttles repeated string single-arg calls", (t) => {
+        const log = ylog({ filename: "test.js" });
+        let errorCalls = 0;
+        const originalError = console.error;
+        t.after(() => {
+            console.error = originalError;
+        });
+        console.error = () => {
+            ++errorCalls;
+        };
+
+        const tag = "string-throttle-" + Date.now();
+        log.error(tag);
+        log.error(tag);
+        log.error(tag);
+        log.error(tag);
+
+        assert.strictEqual(errorCalls, 2, "string single-arg keys should throttle like Error keys");
+    });
+
+    test("does not throttle on object identity", (t) => {
+        const log = ylog({ filename: "test.js" });
+        let errorCalls = 0;
+        const originalError = console.error;
+        t.after(() => {
+            console.error = originalError;
+        });
+        console.error = () => {
+            ++errorCalls;
+        };
+
+        const payload = { reason: "object-throttle-" + Date.now() };
+        log.error(payload);
+        log.error(payload);
+        log.error(payload);
+
+        assert.strictEqual(
+            errorCalls,
+            3,
+            "object-identity throttling should not occur (would leak object graph)",
+        );
     });
 
     test("suppresses null and undefined single arguments", () => {

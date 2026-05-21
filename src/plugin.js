@@ -135,7 +135,10 @@ const isError = (x) => x instanceof Error;
 
 /**
  * Extracts a deduplication key from an argument list. Prefers Error.code or
- * Error.message when an Error is present, otherwise uses the sole argument.
+ * Error.message when an Error is present; otherwise returns the sole argument
+ * coerced to a string when it is a primitive. Object payloads return null so
+ * the throttle Map never pins the object graph and structurally-identical
+ * objects do not throttle independently by identity.
  * @param {Array<*>} args - Arguments passed to a throttled log method.
  * @returns {string|null} Throttle key, or null when no key can be derived.
  */
@@ -145,8 +148,16 @@ const extractKey = (args) => {
             return arg.code || arg.message || String(arg);
         }
     }
-    if (1 === args.length) {
-        return args[0];
+    if (args.length === 1) {
+        const sole = args[0];
+        const t = typeof sole;
+        if (t === "string") {
+            return sole;
+        }
+        if (t === "number" || t === "boolean" || t === "bigint") {
+            return String(sole);
+        }
+        return null;
     }
     return null;
 };
@@ -210,6 +221,7 @@ class Log {
         this.pid = finalOptions.pid;
 
         this.level = levels[finalOptions.level] ?? defaultOptions.level;
+        this.bindings = null;
     }
 
     /**
@@ -245,6 +257,15 @@ class Log {
         if (this.tag) {
             message.push(bracket(this.tag));
         }
+        if (this.bindings) {
+            const parts = [];
+            for (const [k, v] of Object.entries(this.bindings)) {
+                parts.push(`${k}=${v}`);
+            }
+            if (parts.length) {
+                message.push(bracket(parts.join(" ")));
+            }
+        }
         message.push(util.format(...args));
 
         console[stdio](message.join(" "));
@@ -256,7 +277,7 @@ class Log {
      * @param {string} prefix - Label prefix (FATAL, ERROR, WARN).
      * @param {number} level - Numeric log level threshold.
      * @param {Array<number>} color - ANSI color pair.
-     * @returns {Function} Throttled logging function.
+     * @returns {function(...*): void} Throttled logging function.
      */
     throttled(prefix, level, color) {
         return (...args) => {
@@ -304,12 +325,26 @@ class Log {
     }
 
     /**
-     * Returns the current logger. Placeholder for future child-logger support
-     * with submodule tagging.
-     * @returns {Log}
+     * Creates a derived logger that prepends the given bindings to every log
+     * line. Implements the Fastify/Pino child-logger contract — repeated
+     * calls compose bindings, inheriting tag, pid, level, and parent bindings.
+     * @param {object} [bindings] - Key/value pairs rendered as `[k=v ...]` on
+     *   every log line. Omitted or empty produces an unbound child.
+     * @returns {Log} A new logger instance.
      */
-    child() {
-        return this;
+    child(bindings) {
+        const child = Object.create(Log.prototype);
+        child.tag = this.tag;
+        child.pid = this.pid;
+        child.level = this.level;
+        child.bindings =
+            bindings && typeof bindings === "object"
+                ? { ...(this.bindings ?? {}), ...bindings }
+                : (this.bindings ?? null);
+        child.fatal = child.throttled("FATAL", levels.error, colors.magenta);
+        child.error = child.throttled("ERROR", levels.error, colors.red);
+        child.warn = child.throttled("WARN", levels.warn, colors.yellow);
+        return child;
     }
 }
 
@@ -326,7 +361,7 @@ function createLogger(mod, options) {
 /**
  * Sets the global application log level.
  * @param {string} level - Named level (error|warn|info|debug|verbose).
- * @returns {Function} The factory, for chaining.
+ * @returns {typeof createLogger} The factory, for chaining.
  */
 createLogger.loglevel = (level) => {
     appLogLevel = levels[level] ?? appLogLevel;
@@ -335,7 +370,7 @@ createLogger.loglevel = (level) => {
 
 /**
  * Disables syslog severity prefixes in non-TTY output.
- * @returns {Function} The factory, for chaining.
+ * @returns {typeof createLogger} The factory, for chaining.
  */
 createLogger.disableSyslogPrefix = () => {
     useSyslogPrefix = false;
@@ -343,15 +378,20 @@ createLogger.disableSyslogPrefix = () => {
 };
 
 /**
- * Numeric log level constants.
- * @type {object}
+ * Numeric log level constants keyed by level name.
+ * @type {{error: number, warn: number, info: number, debug: number, verbose: number}}
  */
 createLogger.levels = levels;
+
+/**
+ * Default log level resolved at module load (info in production, debug otherwise).
+ * @type {number}
+ */
 createLogger.defaultLevel = appLogLevel;
 
 /**
- * ErrorThrottle constructor for custom throttle instances.
- * @type {Function}
+ * ErrorThrottle class for custom throttle instances.
+ * @type {typeof ErrorThrottle}
  */
 createLogger.ErrorThrottle = ErrorThrottle;
 
