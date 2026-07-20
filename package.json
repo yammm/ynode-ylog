@@ -1,6 +1,6 @@
 {
     "name": "@ynode/ylog",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with Fastify or standalone.",
     "main": "src/plugin.js",
     "types": "index.d.ts",
