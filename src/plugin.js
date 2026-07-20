@@ -39,27 +39,32 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 // Node.js native dependencies
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import util from "node:util";
 
 const levels = {
+    silent: -1,
+    fatal: 0,
     error: 0,
     warn: 1,
     info: 2,
     debug: 3,
+    trace: 4,
     verbose: 4,
 };
+
+const levelNames = Object.fromEntries(Object.entries(levels).map(([name, value]) => [value, name]));
 
 const syslogPrefix = {
     0: "<3>",
     1: "<4>",
     2: "<6>",
     3: "<7>",
-    4: "",
+    4: "<7>",
 };
 
 let appLogLevel = process.env.NODE_ENV !== "production" ? levels.debug : levels.info;
-let useSyslogPrefix = !process.stdout.isTTY;
-const useColors = process.stdout.hasColors && process.stdout.hasColors();
+let useSyslogPrefix = true;
 
 // copying here to restrict colors and optimize speed
 const colors = {
@@ -83,18 +88,19 @@ class ErrorThrottle {
 
     /**
      * @param {number} [max=2] - Maximum calls allowed before suppression.
-     * @param {number} [throttle=30000] - Window duration in milliseconds.
+     * @param {number} [windowMs=30000] - Window duration in milliseconds.
      */
-    constructor(max = 2, throttle = 30 * 1000) {
+    constructor(max = 2, windowMs = 30 * 1000) {
         this.max = max;
-        this.throttle = throttle;
+        this.throttle = windowMs;
         this.map = new Map();
         this.callsSinceEvict = 0;
     }
 
     /**
      * Returns true when the given key has exceeded the max call threshold
-     * within the throttle window and should be suppressed.
+     * within the throttle window and should be suppressed. Suppressed calls do
+     * not extend the window; it expires relative to the last allowed call.
      * @param {string} key - Deduplication key (typically error code or message).
      * @returns {boolean}
      */
@@ -124,8 +130,6 @@ class ErrorThrottle {
         return true;
     }
 }
-
-const throttle = new ErrorThrottle();
 
 /**
  * @param {*} x - Value to check.
@@ -167,7 +171,7 @@ const extractKey = (args) => {
  * @param {number} n - Number between 0-59.
  * @returns {string} Two-character string.
  */
-const pad = (n) => (n < 10 ? "0" + n : n);
+const pad = (n) => String(n).padStart(2, "0");
 
 /**
  * Returns a formatted timestamp string (YYYY-MM-DD HH:mm:ss) for log output.
@@ -182,10 +186,11 @@ const getTimestamp = () => {
  * Wraps a string in ANSI color codes when the terminal supports color.
  * @param {Array<number>} color - ANSI open/close pair from util.inspect.colors.
  * @param {string} s - String to colorize.
+ * @param {boolean} enabled - Whether the destination stream supports color.
  * @returns {string} Colorized string, or the original if colors are unavailable.
  */
-const applyColor = (color, s) => {
-    if (!useColors || !color || !s) {
+const applyColor = (color, s, enabled) => {
+    if (!enabled || !color || !s) {
         return s;
     }
     return `\x1B[${color[0]}m${s}\x1B[${color[1]}m`;
@@ -204,24 +209,46 @@ const bracket = (s, start = "[", end = "]") => {
 
 class Log {
     /**
-     * @param {object} mod - Module metadata (import.meta or { filename }).
+     * @param {object} mod - Module metadata (import.meta or { filename/url }).
      * @param {object} [options] - Logger options.
-     * @param {string} [options.level] - Named log level (error|warn|info|debug|verbose).
+     * @param {string} [options.level] - Named log level (silent|fatal|error|warn|info|debug|trace|verbose).
      * @param {boolean} [options.pid] - Include process PID in output.
      */
     constructor(mod, options = {}) {
-        const defaultOptions = {
-            level: appLogLevel,
-            pid: false,
-        };
+        const normalizedOptions = options && typeof options === "object" ? options : {};
+        const moduleFilename =
+            mod?.filename ??
+            (typeof mod?.url === "string" && mod.url.startsWith("file:")
+                ? fileURLToPath(mod.url)
+                : null);
 
-        const finalOptions = { ...defaultOptions, ...options };
-
-        this.tag = mod?.filename ? path.basename(mod.filename, ".js") : "unknown";
-        this.pid = finalOptions.pid;
-
-        this.level = levels[finalOptions.level] ?? defaultOptions.level;
+        this.tag = moduleFilename ? path.basename(moduleFilename, ".js") : "unknown";
+        this.pid = normalizedOptions.pid ?? false;
+        this._levelOverride = Object.hasOwn(levels, normalizedOptions.level)
+            ? levels[normalizedOptions.level]
+            : null;
+        this.throttle = new ErrorThrottle();
         this.bindings = null;
+    }
+
+    /** Numeric threshold used internally for level comparisons. @returns {number} */
+    get levelValue() {
+        return this._levelOverride ?? appLogLevel;
+    }
+
+    /** Fastify/Pino-compatible named log level. @returns {string} */
+    get level() {
+        return levelNames[this.levelValue];
+    }
+
+    /**
+     * Sets an explicit named level for this logger.
+     * @param {string} level - Named log level.
+     */
+    set level(level) {
+        if (Object.hasOwn(levels, level)) {
+            this._levelOverride = levels[level];
+        }
     }
 
     /**
@@ -234,25 +261,28 @@ class Log {
      * @param {Array<number>} [color] - ANSI open/close pair from util.inspect.colors.
      */
     log(prefix, level, args, color) {
-        if (level > this.level) {
+        if (level > this.levelValue) {
             return;
         }
 
         const stdio = level === levels.error ? "error" : level === levels.warn ? "warn" : "log";
+        const stream = stdio === "log" ? process.stdout : process.stderr;
+        const isTTY = stream.isTTY === true;
+        const useColors = stream.hasColors?.() ?? false;
 
         const message = [];
 
-        if (useSyslogPrefix) {
+        if (useSyslogPrefix && !isTTY) {
             message.push(syslogPrefix[level]);
         }
-        if (process.stdout.isTTY) {
+        if (isTTY) {
             message.push(`[${getTimestamp()}]`);
         }
         if (prefix) {
-            message.push(applyColor(color, bracket(prefix)));
+            message.push(applyColor(color, bracket(prefix), useColors));
         }
         if (this.pid) {
-            message.push(applyColor(colors.cyan, bracket(process.pid, "{", "}")));
+            message.push(applyColor(colors.cyan, bracket(process.pid, "{", "}"), useColors));
         }
         if (this.tag) {
             message.push(bracket(this.tag));
@@ -272,37 +302,47 @@ class Log {
     }
 
     /**
-     * Creates a throttled log function that suppresses duplicate messages
-     * after the configured max calls within the throttle window.
-     * @param {string} prefix - Label prefix (FATAL, ERROR, WARN).
+     * Emits a throttled message after checking its log level. Throttle keys are
+     * isolated by root logger and severity so one logger or level cannot consume
+     * another logger's error budget. Child loggers share their parent's budget.
+     * @param {string} prefix - Label prefix (ERROR or WARN).
      * @param {number} level - Numeric log level threshold.
      * @param {Array<number>} color - ANSI color pair.
-     * @returns {function(...*): void} Throttled logging function.
+     * @param {Array<*>} args - Log arguments.
      */
-    throttled(prefix, level, color) {
-        return (...args) => {
-            if (
-                !args.length ||
-                (args.length === 1 && (args[0] === null || args[0] === undefined))
-            ) {
-                return;
-            }
-            const key = extractKey(args);
-            if (key && throttle.shouldThrottle(key)) {
-                return;
-            }
-            this.log(prefix, level, args, color);
-        };
+    emitThrottled(prefix, level, color, args) {
+        if (level > this.levelValue) {
+            return;
+        }
+        if (!args.length || (args.length === 1 && (args[0] === null || args[0] === undefined))) {
+            return;
+        }
+
+        const key = extractKey(args);
+        const scopedKey = key ? `${prefix}\0${key}` : null;
+        if (scopedKey && this.throttle.shouldThrottle(scopedKey)) {
+            return;
+        }
+        this.log(prefix, level, args, color);
     }
 
-    /** Throttled FATAL output on stderr in magenta. @param {...*} args */
-    fatal = this.throttled("FATAL", levels.error, colors.magenta);
+    /** FATAL output on stderr in magenta. Fatal messages are never throttled. @param {...*} args */
+    fatal(...args) {
+        if (!args.length || (args.length === 1 && (args[0] === null || args[0] === undefined))) {
+            return;
+        }
+        this.log("FATAL", levels.error, args, colors.magenta);
+    }
 
     /** Throttled ERROR output on stderr in red. @param {...*} args */
-    error = this.throttled("ERROR", levels.error, colors.red);
+    error(...args) {
+        this.emitThrottled("ERROR", levels.error, colors.red, args);
+    }
 
     /** Throttled WARN output on stderr in yellow. @param {...*} args */
-    warn = this.throttled("WARN", levels.warn, colors.yellow);
+    warn(...args) {
+        this.emitThrottled("WARN", levels.warn, colors.yellow, args);
+    }
 
     /** INFO output on stdout in blue. @param {...*} args */
     info(...args) {
@@ -324,33 +364,39 @@ class Log {
         this.log("TRACE", levels.verbose, args);
     }
 
+    /** Fastify/Pino-compatible no-op log method. */
+    silent() {}
+
     /**
      * Creates a derived logger that prepends the given bindings to every log
      * line. Implements the Fastify/Pino child-logger contract — repeated
      * calls compose bindings, inheriting tag, pid, level, and parent bindings.
      * @param {object} [bindings] - Key/value pairs rendered as `[k=v ...]` on
      *   every log line. Omitted or empty produces an unbound child.
+     * @param {object} [options] - Fastify/Pino child logger options.
+     * @param {string} [options.level] - Optional child-specific log level.
      * @returns {Log} A new logger instance.
      */
-    child(bindings) {
+    child(bindings, options = {}) {
         const child = Object.create(Log.prototype);
         child.tag = this.tag;
         child.pid = this.pid;
-        child.level = this.level;
+        child._levelOverride = this._levelOverride;
+        child.throttle = this.throttle;
+        if (options && typeof options === "object" && Object.hasOwn(levels, options.level)) {
+            child._levelOverride = levels[options.level];
+        }
         child.bindings =
             bindings && typeof bindings === "object"
                 ? { ...(this.bindings ?? {}), ...bindings }
                 : (this.bindings ?? null);
-        child.fatal = child.throttled("FATAL", levels.error, colors.magenta);
-        child.error = child.throttled("ERROR", levels.error, colors.red);
-        child.warn = child.throttled("WARN", levels.warn, colors.yellow);
         return child;
     }
 }
 
 /**
  * Factory that creates a new Log instance.
- * @param {object} mod - Module metadata (import.meta or { filename }).
+ * @param {object} mod - Module metadata (import.meta or { filename/url }).
  * @param {object} [options] - Logger options forwarded to the Log constructor.
  * @returns {Log}
  */
@@ -360,17 +406,20 @@ function createLogger(mod, options) {
 
 /**
  * Sets the global application log level.
- * @param {string} level - Named level (error|warn|info|debug|verbose).
- * @returns {typeof createLogger} The factory, for chaining.
+ * Existing loggers without an explicit level observe the change immediately.
+ * @param {string} level - Named level (silent|fatal|error|warn|info|debug|trace|verbose).
+ * @returns {function} The factory, for chaining.
  */
 createLogger.loglevel = (level) => {
-    appLogLevel = levels[level] ?? appLogLevel;
+    if (Object.hasOwn(levels, level)) {
+        appLogLevel = levels[level];
+    }
     return createLogger;
 };
 
 /**
  * Disables syslog severity prefixes in non-TTY output.
- * @returns {typeof createLogger} The factory, for chaining.
+ * @returns {function} The factory, for chaining.
  */
 createLogger.disableSyslogPrefix = () => {
     useSyslogPrefix = false;
@@ -379,19 +428,22 @@ createLogger.disableSyslogPrefix = () => {
 
 /**
  * Numeric log level constants keyed by level name.
- * @type {{error: number, warn: number, info: number, debug: number, verbose: number}}
+ * @type {{silent: number, fatal: number, error: number, warn: number, info: number, debug: number, trace: number, verbose: number}}
  */
 createLogger.levels = levels;
 
 /**
- * Default log level resolved at module load (info in production, debug otherwise).
+ * Current default log level for loggers without an explicit override.
  * @type {number}
  */
-createLogger.defaultLevel = appLogLevel;
+Object.defineProperty(createLogger, "defaultLevel", {
+    enumerable: true,
+    get: () => appLogLevel,
+});
 
 /**
  * ErrorThrottle class for custom throttle instances.
- * @type {typeof ErrorThrottle}
+ * @type {function}
  */
 createLogger.ErrorThrottle = ErrorThrottle;
 
