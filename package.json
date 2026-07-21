@@ -1,6 +1,6 @@
 {
     "name": "@ynode/ylog",
-    "version": "1.6.0+290592",
+    "version": "1.6.0+290605",
     "description": "Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with Fastify or standalone.",
     "main": "src/plugin.js",
     "types": "index.d.ts",
@@ -42,7 +42,7 @@
         "eslint-plugin-simple-import-sort": "^14.0.0",
         "globals": "^17.7.0",
         "jsdoc": "^4.0.5",
-        "prettier": "^3.9.5",
+        "prettier": "^3.9.6",
         "rimraf": "^6.1.3"
     },
     "scripts": {
