@@ -1,6 +1,6 @@
 {
     "name": "@ynode/ylog",
-    "version": "1.5.0",
+    "version": "1.5.0+290558",
     "description": "Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with Fastify or standalone.",
     "main": "src/plugin.js",
     "types": "index.d.ts",
@@ -34,7 +34,7 @@
         "@eslint/js": "^10.0.1",
         "@eslint/json": "^2.0.1",
         "@eslint/markdown": "^8.0.3",
-        "@mikinho/autover": "^2.1.0",
+        "@mikinho/autover": "^3.0.0",
         "auto-changelog": "^2.6.0",
         "eslint": "^10.7.0",
         "eslint-config-prettier": "^10.1.8",
@@ -58,7 +58,7 @@
         "ver:apply": "npx autover --guard-unchanged --short",
         "test": "node --test",
         "test:staged": "eslint --no-warn-ignored $(git diff --cached --name-only --diff-filter=ACMRTUXB | tr '\\n' ' ')",
-        "prepublishOnly": "npm run lint && npm test",
+        "prepublishOnly": "npm run format:check && npm run lint && npm test && npm run docs",
         "postversion": "git push && git push --tags"
     },
     "publishConfig": {

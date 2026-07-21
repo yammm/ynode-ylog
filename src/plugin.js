@@ -42,7 +42,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import util from "node:util";
 
-const levels = {
+const levels = Object.freeze({
     silent: -1,
     fatal: 0,
     error: 0,
@@ -51,7 +51,7 @@ const levels = {
     debug: 3,
     trace: 4,
     verbose: 4,
-};
+});
 
 const levelNames = Object.fromEntries(Object.entries(levels).map(([name, value]) => [value, name]));
 

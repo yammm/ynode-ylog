@@ -558,6 +558,7 @@ describe("throttle mechanism", () => {
 
 describe("factory static methods", () => {
     test("levels exposes the level hierarchy", () => {
+        assert.ok(Object.isFrozen(ylog.levels));
         assert.strictEqual(ylog.levels.silent, -1);
         assert.strictEqual(ylog.levels.fatal, 0);
         assert.strictEqual(ylog.levels.error, 0);
