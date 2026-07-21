@@ -1,6 +1,9 @@
 export type LogLevel =
     "silent" | "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "verbose";
 
+export type LogFormat = "text" | "json";
+export type LogBindings = Record<string, unknown>;
+
 export interface YlogOptions {
     /**
      * Named log level threshold.
@@ -13,11 +16,32 @@ export interface YlogOptions {
      * @default false
      */
     pid?: boolean;
+
+    /**
+     * Output format. "text" preserves the classic colored/syslog line format;
+     * "json" emits one JSON object per log call.
+     * @default "text"
+     */
+    format?: LogFormat;
+
+    /**
+     * Alias for format: "json".
+     * @default false
+     */
+    json?: boolean;
+
+    /**
+     * Static fields included with every log line.
+     */
+    bindings?: LogBindings;
 }
 
 export interface ChildLoggerOptions {
     /** Optional log-level override for the derived logger. */
     level?: LogLevel;
+
+    /** Optional output-format override for the derived logger. */
+    format?: LogFormat;
 
     /** Accepted for compatibility with Fastify/Pino child logger calls. */
     serializers?: Record<string, unknown>;
@@ -46,7 +70,7 @@ export interface Logger {
      * Creates a derived logger that prepends the given bindings to every log line.
      * Compatible with the Fastify/Pino child-logger contract.
      */
-    child(bindings?: Record<string, unknown>, options?: ChildLoggerOptions): Logger;
+    child(bindings?: LogBindings, options?: ChildLoggerOptions): Logger;
 }
 
 export interface LogLevels {
@@ -68,6 +92,12 @@ export interface CreateLogger {
 
     /** Disables syslog severity prefixes in non-TTY output. */
     disableSyslogPrefix(): CreateLogger;
+
+    /** Runs callback with async request/context bindings included in emitted logs. */
+    withContext<T>(bindings: LogBindings, callback: () => T): T;
+
+    /** Returns the active async request/context bindings. */
+    getContext(): LogBindings;
 
     /** Numeric log level constants. */
     levels: LogLevels;

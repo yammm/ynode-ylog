@@ -38,6 +38,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 // Node.js native dependencies
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import util from "node:util";
@@ -65,6 +66,7 @@ const syslogPrefix = {
 
 let appLogLevel = process.env.NODE_ENV !== "production" ? levels.debug : levels.info;
 let useSyslogPrefix = true;
+const contextStore = new AsyncLocalStorage();
 
 // copying here to restrict colors and optimize speed
 const colors = {
@@ -136,6 +138,130 @@ class ErrorThrottle {
  * @returns {boolean} True when x is an Error instance.
  */
 const isError = (x) => x instanceof Error;
+
+/**
+ * Returns true when a value is an object suitable for log bindings.
+ * @param {*} value - Candidate binding object.
+ * @returns {boolean}
+ */
+const isBindingObject = (value) =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * Shallow-copies log bindings so callers cannot mutate logger/context state
+ * after binding creation.
+ * @param {object} bindings - Candidate binding object.
+ * @returns {object|null}
+ */
+const normalizeBindings = (bindings) => {
+    if (!isBindingObject(bindings)) {
+        return null;
+    }
+    return { ...bindings };
+};
+
+/**
+ * Returns the active AsyncLocalStorage logging context.
+ * @returns {object|null}
+ */
+const currentContextBindings = () => normalizeBindings(contextStore.getStore());
+
+/**
+ * Merges optional binding objects, preserving later values for duplicate keys.
+ * @param {...object|null} bindingSets - Binding objects to merge.
+ * @returns {object|null}
+ */
+const mergeBindings = (...bindingSets) => {
+    const merged = {};
+    for (const bindings of bindingSets) {
+        if (isBindingObject(bindings)) {
+            Object.assign(merged, bindings);
+        }
+    }
+    return Object.keys(merged).length ? merged : null;
+};
+
+/**
+ * Runs callback with merged AsyncLocalStorage bindings for request correlation.
+ * @param {object} bindings - Context bindings to expose to log calls.
+ * @param {function} callback - Work to run inside the logging context.
+ * @returns {*} The callback result.
+ */
+const runWithContext = (bindings, callback) => {
+    if (typeof callback !== "function") {
+        throw new TypeError("ylog.withContext requires a callback function");
+    }
+    const merged = mergeBindings(currentContextBindings(), normalizeBindings(bindings)) ?? {};
+    return contextStore.run(merged, callback);
+};
+
+/**
+ * Converts an Error into a JSON-safe shape.
+ * @param {Error} error - Error instance.
+ * @returns {object}
+ */
+const serializeError = (error) => {
+    const serialized = {
+        name: error.name,
+        message: error.message,
+    };
+    if (error.stack) {
+        serialized.stack = error.stack;
+    }
+    if (Object.hasOwn(error, "code")) {
+        serialized.code = error.code;
+    }
+    return serialized;
+};
+
+/**
+ * Creates a JSON.stringify replacer that handles Errors, BigInts, and circular
+ * object graphs without throwing.
+ * @returns {function}
+ */
+const createJsonReplacer = () => {
+    const seen = new WeakSet();
+    return (_key, value) => {
+        if (isError(value)) {
+            return serializeError(value);
+        }
+        if (typeof value === "bigint") {
+            return value.toString();
+        }
+        if (value && typeof value === "object") {
+            if (seen.has(value)) {
+                return "[Circular]";
+            }
+            seen.add(value);
+        }
+        return value;
+    };
+};
+
+/**
+ * Builds a structured JSON log line.
+ * @param {object} options - Log record inputs.
+ * @returns {string}
+ */
+const buildJsonLine = ({ tag, pid, prefix, args, bindings }) => {
+    const record = {
+        ...(bindings ?? {}),
+        time: new Date().toISOString(),
+        level: prefix ? prefix.toLowerCase() : "info",
+        tag,
+        msg: util.format(...args),
+    };
+    if (pid) {
+        record.pid = process.pid;
+    }
+
+    const error = args.find(isError);
+    if (error) {
+        record.err = error;
+    }
+
+    return JSON.stringify(record, createJsonReplacer());
+};
 
 /**
  * Extracts a deduplication key from an argument list. Prefers Error.code or
@@ -213,6 +339,8 @@ class Log {
      * @param {object} [options] - Logger options.
      * @param {string} [options.level] - Named log level (silent|fatal|error|warn|info|debug|trace|verbose).
      * @param {boolean} [options.pid] - Include process PID in output.
+     * @param {"text"|"json"} [options.format="text"] - Output format.
+     * @param {object} [options.bindings] - Static bindings for every log line.
      */
     constructor(mod, options = {}) {
         const normalizedOptions = options && typeof options === "object" ? options : {};
@@ -224,11 +352,15 @@ class Log {
 
         this.tag = moduleFilename ? path.basename(moduleFilename, ".js") : "unknown";
         this.pid = normalizedOptions.pid ?? false;
+        this.format =
+            normalizedOptions.format === "json" || normalizedOptions.json === true
+                ? "json"
+                : "text";
         this._levelOverride = Object.hasOwn(levels, normalizedOptions.level)
             ? levels[normalizedOptions.level]
             : null;
         this.throttle = new ErrorThrottle();
-        this.bindings = null;
+        this.bindings = normalizeBindings(normalizedOptions.bindings);
     }
 
     /** Numeric threshold used internally for level comparisons. @returns {number} */
@@ -270,6 +402,21 @@ class Log {
         const isTTY = stream.isTTY === true;
         const useColors = stream.hasColors?.() ?? false;
 
+        const activeBindings = mergeBindings(currentContextBindings(), this.bindings);
+
+        if (this.format === "json") {
+            console[stdio](
+                buildJsonLine({
+                    tag: this.tag,
+                    pid: this.pid,
+                    prefix,
+                    args,
+                    bindings: activeBindings,
+                }),
+            );
+            return;
+        }
+
         const message = [];
 
         if (useSyslogPrefix && !isTTY) {
@@ -287,9 +434,9 @@ class Log {
         if (this.tag) {
             message.push(bracket(this.tag));
         }
-        if (this.bindings) {
+        if (activeBindings) {
             const parts = [];
-            for (const [k, v] of Object.entries(this.bindings)) {
+            for (const [k, v] of Object.entries(activeBindings)) {
                 parts.push(`${k}=${v}`);
             }
             if (parts.length) {
@@ -381,15 +528,21 @@ class Log {
         const child = Object.create(Log.prototype);
         child.tag = this.tag;
         child.pid = this.pid;
+        child.format = this.format;
         child._levelOverride = this._levelOverride;
         child.throttle = this.throttle;
         if (options && typeof options === "object" && Object.hasOwn(levels, options.level)) {
             child._levelOverride = levels[options.level];
         }
-        child.bindings =
-            bindings && typeof bindings === "object"
-                ? { ...(this.bindings ?? {}), ...bindings }
-                : (this.bindings ?? null);
+        if (options && typeof options === "object" && options.format === "json") {
+            child.format = "json";
+        } else if (options && typeof options === "object" && options.format === "text") {
+            child.format = "text";
+        }
+        const childBindings = normalizeBindings(bindings);
+        child.bindings = childBindings
+            ? { ...(this.bindings ?? {}), ...childBindings }
+            : (this.bindings ?? null);
         return child;
     }
 }
@@ -425,6 +578,21 @@ createLogger.disableSyslogPrefix = () => {
     useSyslogPrefix = false;
     return createLogger;
 };
+
+/**
+ * Runs callback with request/context bindings included in every log line emitted
+ * by the current async execution path.
+ * @param {object} bindings - Context bindings.
+ * @param {function} callback - Work to run inside the context.
+ * @returns {*} The callback result.
+ */
+createLogger.withContext = (bindings, callback) => runWithContext(bindings, callback);
+
+/**
+ * Returns a shallow copy of the active async logging context.
+ * @returns {object}
+ */
+createLogger.getContext = () => currentContextBindings() ?? {};
 
 /**
  * Numeric log level constants keyed by level name.

@@ -219,6 +219,101 @@ describe("basic logging", () => {
     });
 });
 
+describe("structured logging and context", () => {
+    test("format json emits a parseable structured record", (t) => {
+        const lines = [];
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => lines.push(line);
+
+        const log = ylog(
+            { filename: "json-output.js" },
+            { format: "json", pid: true, bindings: { service: "api" } },
+        );
+        log.info("hello %s", "world");
+
+        assert.strictEqual(lines.length, 1);
+        const record = JSON.parse(lines[0]);
+        assert.strictEqual(record.level, "info");
+        assert.strictEqual(record.tag, "json-output");
+        assert.strictEqual(record.service, "api");
+        assert.strictEqual(record.msg, "hello world");
+        assert.strictEqual(typeof record.pid, "number");
+        assert.match(record.time, /^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    test("format json serializes errors and BigInt bindings safely", (t) => {
+        const lines = [];
+        const originalError = console.error;
+        t.after(() => {
+            console.error = originalError;
+        });
+        console.error = (line) => lines.push(line);
+
+        const log = ylog(
+            { filename: "json-error.js" },
+            { level: "error", format: "json", bindings: { attempt: 3n } },
+        );
+        const error = new Error(uniqueKey("json-error"));
+        error.code = "E_JSON_TEST";
+        log.error(error);
+
+        const record = JSON.parse(lines[0]);
+        assert.strictEqual(record.level, "error");
+        assert.strictEqual(record.attempt, "3");
+        assert.strictEqual(record.err.name, "Error");
+        assert.strictEqual(record.err.code, "E_JSON_TEST");
+        assert.match(record.err.message, /json-error/);
+    });
+
+    test("withContext adds async request bindings without leaking", async (t) => {
+        const lines = [];
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => lines.push(JSON.parse(line));
+
+        const log = ylog({ filename: "context.js" }, { format: "json" });
+
+        await ylog.withContext({ reqId: "abc123" }, async () => {
+            await new Promise((resolve) => setImmediate(resolve));
+            log.info("inside request");
+        });
+        log.info("outside request");
+
+        assert.strictEqual(lines[0].reqId, "abc123");
+        assert.strictEqual(lines[0].msg, "inside request");
+        assert.strictEqual(lines[1].reqId, undefined);
+        assert.strictEqual(lines[1].msg, "outside request");
+    });
+
+    test("child loggers compose with async context bindings", async (t) => {
+        let captured;
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = JSON.parse(line);
+        };
+
+        const log = ylog({ filename: "context-child.js" }, { format: "json" }).child({
+            route: "/health",
+        });
+
+        await ylog.withContext({ reqId: "abc123" }, async () => {
+            log.info("healthy");
+        });
+
+        assert.strictEqual(captured.reqId, "abc123");
+        assert.strictEqual(captured.route, "/health");
+        assert.strictEqual(captured.msg, "healthy");
+    });
+});
+
 describe("log level option", () => {
     test("level option is respected — error-only logger suppresses info", (t) => {
         const log = ylog({ filename: "test.js" }, { level: "error" });

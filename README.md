@@ -70,6 +70,23 @@ const requestLog = log.child({ reqId: "abc123" }, { level: "error" });
 requestLog.error("Request failed");
 ```
 
+## Structured Output and Request Context
+
+Set `format: "json"` to emit one JSON object per log call. Static logger bindings and active async context bindings are added as top-level fields, with core fields such as `time`, `level`, `tag`, `msg`, and enabled `pid` output protected from being overwritten.
+
+```javascript
+const log = ylog(import.meta, {
+    format: "json",
+    bindings: { service: "api" },
+});
+
+await ylog.withContext({ reqId: "abc123" }, async () => {
+    log.info("Request started");
+});
+```
+
+Use `ylog.getContext()` to read the current context bindings inside the active async execution path.
+
 ## Duplicate Throttling
 
 Duplicate `error` and `warn` messages are limited to two emissions per 30-second window. Budgets are isolated by root logger and severity; derived child loggers share their parent's budget. Messages filtered by the active log level do not consume a budget, and `fatal` messages are never throttled.
