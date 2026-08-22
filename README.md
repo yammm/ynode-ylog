@@ -1,6 +1,6 @@
 # @ynode/ylog
 
-Copyright (c) 2025 Michael Welter <me@mikinho.com>
+Copyright (c) 2026 Michael Welter <me@mikinho.com>
 
 [![npm version](https://img.shields.io/npm/v/@ynode/ylog.svg)](https://www.npmjs.com/package/@ynode/ylog) [![license](https://img.shields.io/npm/l/@ynode/ylog.svg)](https://github.com/yammm/ynode-ylog/blob/main/LICENSE)
 
