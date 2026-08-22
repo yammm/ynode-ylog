@@ -69,7 +69,9 @@ export interface ModuleMetadata {
 
 export interface Logger {
     /** Current named level. Loggers without an override follow the global level. */
-    level: LogLevel;
+    get level(): LogLevel;
+    /** Sets an override, or clears it with null/undefined to follow the global level. */
+    set level(value: LogLevel | null | undefined);
     fatal(...args: unknown[]): void;
     error(...args: unknown[]): void;
     warn(...args: unknown[]): void;

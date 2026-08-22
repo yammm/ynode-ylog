@@ -363,7 +363,7 @@ describe("structured logging and context", () => {
         assert.strictEqual(record.pid, process.pid);
     });
 
-    test("format json keeps the error stack solely in the err field", (t) => {
+    test("format json keeps the error stack solely in err for every argument position", (t) => {
         const lines = [];
         const originalError = console.error;
         t.after(() => {
@@ -372,16 +372,35 @@ describe("structured logging and context", () => {
         console.error = (line) => lines.push(line);
 
         const log = ylog({ filename: "json-stack.js" }, { level: "error", format: "json" });
-        const error = new Error(uniqueKey("single-stack"));
-        log.error("request failed:", error);
+        for (const [position, args, expected] of [
+            [
+                "first",
+                (error) => [error, "request failed"],
+                (message) => `${message} request failed`,
+            ],
+            [
+                "middle",
+                (error) => ["request", error, "failed"],
+                (message) => `request ${message} failed`,
+            ],
+            [
+                "last",
+                (error) => ["request failed:", error],
+                (message) => `request failed: ${message}`,
+            ],
+        ]) {
+            const error = new Error(uniqueKey(`single-stack-${position}`));
+            log.error(...args(error));
 
-        const record = JSON.parse(lines[0]);
-        const stackFrame = error.stack.split("\n")[1].trim();
-        const occurrences = lines[0].split(stackFrame).length - 1;
+            const line = lines.at(-1);
+            const record = JSON.parse(line);
+            const stackFrame = error.stack.split("\n")[1].trim();
+            const occurrences = line.split(stackFrame).length - 1;
 
-        assert.strictEqual(record.msg, `request failed: ${error.message}`);
-        assert.strictEqual(record.err.stack, error.stack);
-        assert.strictEqual(occurrences, 1, "stack must appear exactly once per record");
+            assert.strictEqual(record.msg, expected(error.message));
+            assert.strictEqual(record.err.stack, error.stack);
+            assert.strictEqual(occurrences, 1, "stack must appear exactly once per record");
+        }
     });
 
     test("withContext adds async request bindings without leaking", async (t) => {
@@ -496,19 +515,14 @@ describe("log level option", () => {
         assert.strictEqual(log.level, "trace");
     });
 
-    test("invalid level falls back to default", (t) => {
-        const log = ylog({ filename: "test.js" }, { level: "nonexistent" });
-        let called = false;
-        const originalLog = console.log;
-        t.after(() => {
-            console.log = originalLog;
-        });
-        console.log = () => {
-            called = true;
-        };
+    test("invalid constructor and child level names throw", () => {
+        assert.throws(
+            () => ylog({ filename: "invalid-constructor.js" }, { level: "nonexistent" }),
+            TypeError,
+        );
 
-        log.info("should still work with fallback level");
-        assert.ok(called, "info should emit at default fallback level");
+        const log = ylog({ filename: "invalid-child.js" }, { level: "debug" });
+        assert.throws(() => log.child({}, { level: "wran" }), TypeError);
     });
 
     test("assigning an invalid level name throws and keeps the current level", () => {

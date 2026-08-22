@@ -268,14 +268,10 @@ const createJsonReplacer = () => {
 const buildJsonLine = ({ tag, pid, prefix, args, bindings }) => {
     const error = args.find(isError);
 
-    // When the final argument is an Error its stack lives solely in the
-    // structured `err` field; `msg` carries only the error message so the
-    // stack is not duplicated in every record.
-    let msgArgs = args;
-    const lastArg = args[args.length - 1];
-    if (isError(lastArg)) {
-        msgArgs = [...args.slice(0, -1), lastArg.message];
-    }
+    // Error stacks live solely in the structured `err` field regardless of
+    // argument order. `msg` uses each Error's message so mixed context/error
+    // calls remain readable without duplicating a stack.
+    const msgArgs = args.map((arg) => (isError(arg) ? arg.message : arg));
 
     const record = {
         ...(bindings ?? {}),
@@ -431,6 +427,14 @@ class Log {
             normalizedOptions.format === "json" || normalizedOptions.json === true
                 ? "json"
                 : "text";
+        if (
+            normalizedOptions.level !== undefined &&
+            !Object.hasOwn(levels, normalizedOptions.level)
+        ) {
+            throw new TypeError(
+                `@ynode/ylog unknown log level: ${String(normalizedOptions.level)}`,
+            );
+        }
         this._levelOverrideName = Object.hasOwn(levels, normalizedOptions.level)
             ? normalizedOptions.level
             : null;
@@ -642,9 +646,10 @@ class Log {
                 childOptions.format === "json" || childOptions.format === "text"
                     ? childOptions.format
                     : this.format,
-            level: Object.hasOwn(levels, childOptions.level)
-                ? childOptions.level
-                : (this._levelOverrideName ?? undefined),
+            level:
+                childOptions.level === undefined
+                    ? (this._levelOverrideName ?? undefined)
+                    : childOptions.level,
             sanitize: this.sanitize,
             bindings: childBindings
                 ? { ...(this.bindings ?? {}), ...childBindings }
