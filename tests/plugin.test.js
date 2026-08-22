@@ -395,6 +395,29 @@ describe("log level option", () => {
         assert.ok(called, "info should emit at default fallback level");
     });
 
+    test("assigning an invalid level name throws and keeps the current level", () => {
+        const log = ylog({ filename: "invalid-set.js" }, { level: "debug" });
+
+        assert.throws(() => {
+            log.level = "wran";
+        }, TypeError);
+        assert.strictEqual(log.level, "debug");
+    });
+
+    test("assigning null clears the override so the logger follows the global level", (t) => {
+        const log = ylog({ filename: "clear-override.js" }, { level: "debug" });
+        t.after(restoreDefaultLevel);
+
+        ylog.loglevel("error");
+        assert.strictEqual(log.level, "debug");
+
+        log.level = null;
+        assert.strictEqual(log.level, "error");
+
+        ylog.loglevel("info");
+        assert.strictEqual(log.level, "info");
+    });
+
     test("global level changes update existing implicit loggers and defaultLevel", (t) => {
         const log = ylog({ filename: "live-global.js" });
         const lines = [];
@@ -726,10 +749,11 @@ describe("factory static methods", () => {
         assert.strictEqual(result, ylog);
     });
 
-    test("invalid global levels leave the current default unchanged", (t) => {
+    test("invalid global levels throw and leave the current default unchanged", (t) => {
         t.after(restoreDefaultLevel);
         ylog.loglevel("warn");
-        ylog.loglevel("__proto__");
+        assert.throws(() => ylog.loglevel("__proto__"), TypeError);
+        assert.throws(() => ylog.loglevel("wran"), /unknown log level: wran/);
         assert.strictEqual(ylog.defaultLevel, ylog.levels.warn);
     });
 

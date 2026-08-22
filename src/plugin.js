@@ -380,14 +380,22 @@ class Log {
     }
 
     /**
-     * Sets an explicit named level for this logger.
-     * @param {string} level - Named log level.
+     * Sets an explicit named level for this logger. Assigning null or
+     * undefined clears the override so the logger follows the global level.
+     * @param {string|null|undefined} level - Named log level, or null/undefined to clear.
+     * @throws {TypeError} When the level name is not recognized.
      */
     set level(level) {
-        if (Object.hasOwn(levels, level)) {
-            this._levelOverrideName = level;
-            this._levelOverride = levels[level];
+        if (level === null || level === undefined) {
+            this._levelOverrideName = null;
+            this._levelOverride = null;
+            return;
         }
+        if (!Object.hasOwn(levels, level)) {
+            throw new TypeError(`@ynode/ylog unknown log level: ${String(level)}`);
+        }
+        this._levelOverrideName = level;
+        this._levelOverride = levels[level];
     }
 
     /**
@@ -571,12 +579,14 @@ function createLogger(mod, options) {
  * Existing loggers without an explicit level observe the change immediately.
  * @param {string} level - Named level (silent|fatal|error|warn|info|debug|trace|verbose).
  * @returns {function} The factory, for chaining.
+ * @throws {TypeError} When the level name is not recognized.
  */
 createLogger.loglevel = (level) => {
-    if (Object.hasOwn(levels, level)) {
-        appLogLevelName = level;
-        appLogLevel = levels[level];
+    if (!Object.hasOwn(levels, level)) {
+        throw new TypeError(`@ynode/ylog unknown log level: ${String(level)}`);
     }
+    appLogLevelName = level;
+    appLogLevel = levels[level];
     return createLogger;
 };
 
