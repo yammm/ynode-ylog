@@ -33,17 +33,16 @@ import eslintConfigPrettier from "eslint-config-prettier";
 import simpleImportSort from "eslint-plugin-simple-import-sort";
 import globals from "globals";
 
+const ignores = [
+    "CHANGELOG.md",
+    "**/node_modules/**",
+    "**/*.min.js",
+    "**/package-lock.json",
+    "**/docs/**",
+];
+
 export default defineConfig([
-    // Global ignores: an object with only `ignores` applies to every config block.
-    {
-        ignores: [
-            "CHANGELOG.md",
-            "**/node_modules/**",
-            "**/*.min.js",
-            "**/package-lock.json",
-            "**/docs/**",
-        ],
-    },
+    { ignores },
     {
         linterOptions: { reportUnusedDisableDirectives: true },
     },
@@ -90,8 +89,7 @@ export default defineConfig([
     // Put this LAST to disable rules that conflict with Prettier formatting
     eslintConfigPrettier,
     {
-        // eslint-config-prettier turns off `curly`, but brace presence is code
-        // structure Prettier does not manage, so we strictly enforce it.
+        // eslint-config-prettier turns off `curly`, but we want to strictly enforce it
         files: ["**/*.{js,mjs,cjs}"],
         rules: {
             curly: ["error", "all"],
