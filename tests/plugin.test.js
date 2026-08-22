@@ -506,6 +506,119 @@ describe("structured logging and context", () => {
     });
 });
 
+describe("secret redaction", () => {
+    test("redacts bindings, context, child bindings, and structured JSON fields", (t) => {
+        const lines = [];
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => lines.push(JSON.parse(line));
+
+        const payloadError = new Error("safe failure");
+        const payload = {
+            user: { id: 42, password: "call-secret" },
+            cards: [
+                { cvv: "123", last4: "4242" },
+                { cvv: "456", last4: "1111" },
+            ],
+            err: payloadError,
+        };
+        const bindings = { authorization: "Bearer binding-secret", service: "api" };
+        const childBindings = { apiKey: "child-secret" };
+        const log = ylog(
+            { filename: "redact-json.js" },
+            {
+                format: "json",
+                bindings,
+                redact: {
+                    paths: [
+                        "authorization",
+                        "apiKey",
+                        "session.token",
+                        "user.password",
+                        "cards.*.cvv",
+                        "err.stack",
+                    ],
+                    censor: "[Secret]",
+                },
+            },
+        ).child(childBindings);
+
+        ylog.withContext({ session: { token: "context-secret", region: "us" } }, () => {
+            log.info(payload, "authenticated");
+        });
+
+        assert.strictEqual(lines.length, 1);
+        assert.strictEqual(lines[0].authorization, "[Secret]");
+        assert.strictEqual(lines[0].apiKey, "[Secret]");
+        assert.strictEqual(lines[0].session.token, "[Secret]");
+        assert.strictEqual(lines[0].session.region, "us");
+        assert.strictEqual(lines[0].user.password, "[Secret]");
+        assert.deepStrictEqual(
+            lines[0].cards.map(({ cvv, last4 }) => ({ cvv, last4 })),
+            [
+                { cvv: "[Secret]", last4: "4242" },
+                { cvv: "[Secret]", last4: "1111" },
+            ],
+        );
+        assert.strictEqual(lines[0].err.stack, "[Secret]");
+        assert.strictEqual(lines[0].msg, "authenticated");
+
+        assert.strictEqual(bindings.authorization, "Bearer binding-secret");
+        assert.strictEqual(childBindings.apiKey, "child-secret");
+        assert.strictEqual(payload.user.password, "call-secret");
+        assert.strictEqual(payload.cards[0].cvv, "123");
+        assert.strictEqual(payload.err, payloadError);
+    });
+
+    test("array shorthand redacts text bindings and structured object arguments", (t) => {
+        let captured = "";
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = line;
+        };
+
+        const payload = { profile: { name: "Ada", token: "payload-secret" } };
+        const log = ylog(
+            { filename: "redact-text.js" },
+            {
+                bindings: { password: "binding-secret" },
+                redact: ["password", "profile.token"],
+            },
+        );
+        log.info(payload, "authenticated");
+
+        assert.ok(!captured.includes("binding-secret"));
+        assert.ok(!captured.includes("payload-secret"));
+        assert.ok(captured.includes("password=[Redacted]"));
+        assert.ok(captured.includes("token: '[Redacted]'"));
+        assert.strictEqual(payload.profile.token, "payload-secret");
+    });
+
+    test("rejects malformed redaction policies deterministically", () => {
+        const invalidPolicies = [
+            [null, /redact must be an array of paths or an options object/],
+            ["password", /redact must be an array of paths or an options object/],
+            [{}, /redact\.paths must be an array of strings/],
+            [{ paths: "password" }, /redact\.paths must be an array of strings/],
+            [{ paths: [1] }, /redact paths must be strings/],
+            [{ paths: [""] }, /redact paths must be non-empty dot paths/],
+            [{ paths: ["user..password"] }, /redact paths must be non-empty dot paths/],
+            [{ paths: [" user.password"] }, /redact paths must be non-empty dot paths/],
+            [{ paths: ["password"], censor: 1 }, /redact\.censor must be a string/],
+            [{ paths: ["password"], extra: true }, /redact has unknown option: extra/],
+        ];
+
+        for (const [redact, expected] of invalidPolicies) {
+            assert.throws(() => ylog({ filename: "invalid-redact.js" }, { redact }), expected);
+        }
+    });
+});
+
 describe("log level option", () => {
     test("level option is respected — error-only logger suppresses info", (t) => {
         const log = ylog({ filename: "test.js" }, { level: "error" });

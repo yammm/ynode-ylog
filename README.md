@@ -89,6 +89,24 @@ await ylog.withContext({ reqId: "abc123" }, async () => {
 
 Use `ylog.getContext()` to read the current context bindings inside the active async execution path.
 
+### Secret Redaction
+
+Use `redact` to replace sensitive fields before they are emitted. Paths are dot-delimited and a `*` segment matches every object field or array item. The policy covers logger bindings, async context, and structured object arguments, is inherited by child loggers, and never mutates the source objects.
+
+```javascript
+const log = ylog(import.meta, {
+    format: "json",
+    redact: {
+        paths: ["authorization", "user.password", "cards.*.cvv"],
+        censor: "[Secret]",
+    },
+});
+
+log.info({ user: { id: 42, password: "private" }, cards: [{ cvv: "123" }] }, "User authenticated");
+```
+
+For the default `"[Redacted]"` censor, use the array shorthand: `redact: ["authorization", "user.password"]`. Redaction also covers bindings and object arguments rendered in text mode; unstructured string arguments remain unchanged because they have no field path.
+
 ## Duplicate Throttling
 
 Duplicate `error` and `warn` messages are limited to two emissions per 30-second window. Budgets are isolated by root logger and severity; derived child loggers share their parent's budget. Messages filtered by the active log level do not consume a budget, and `fatal` messages are never throttled.

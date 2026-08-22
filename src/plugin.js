@@ -203,6 +203,166 @@ const mergeBindings = (...bindingSets) => {
     return Object.keys(merged).length ? merged : null;
 };
 
+const DEFAULT_REDACTION_CENSOR = "[Redacted]";
+const REDACTION_OPTION_KEYS = new Set(["paths", "censor"]);
+
+/**
+ * Validates and compiles public redaction configuration.
+ * @param {Array<string>|object|undefined} redact - Redaction shorthand or options.
+ * @returns {{paths: Array<Array<string>>, censor: string}|null} Compiled redaction policy.
+ */
+const normalizeRedaction = (redact) => {
+    if (redact === undefined) {
+        return null;
+    }
+
+    let paths;
+    let censor = DEFAULT_REDACTION_CENSOR;
+    if (Array.isArray(redact)) {
+        paths = redact;
+    } else if (isBindingObject(redact)) {
+        const unknownKey = Object.keys(redact)
+            .filter((key) => !REDACTION_OPTION_KEYS.has(key))
+            .sort()[0];
+        if (unknownKey) {
+            throw new TypeError(`@ynode/ylog redact has unknown option: ${unknownKey}`);
+        }
+        paths = redact.paths;
+        if (redact.censor !== undefined) {
+            if (typeof redact.censor !== "string") {
+                throw new TypeError("@ynode/ylog redact.censor must be a string");
+            }
+            censor = redact.censor;
+        }
+    } else {
+        throw new TypeError("@ynode/ylog redact must be an array of paths or an options object");
+    }
+
+    if (!Array.isArray(paths)) {
+        throw new TypeError("@ynode/ylog redact.paths must be an array of strings");
+    }
+
+    const uniquePaths = new Map();
+    for (const redactPath of paths) {
+        if (typeof redactPath !== "string") {
+            throw new TypeError("@ynode/ylog redact paths must be strings");
+        }
+        const segments = redactPath.split(".");
+        if (!redactPath || segments.some((segment) => !segment || segment.trim() !== segment)) {
+            throw new TypeError(
+                "@ynode/ylog redact paths must be non-empty dot paths without surrounding whitespace",
+            );
+        }
+        if (!uniquePaths.has(redactPath)) {
+            uniquePaths.set(redactPath, Object.freeze(segments));
+        }
+    }
+
+    if (!uniquePaths.size) {
+        return null;
+    }
+    return Object.freeze({ paths: Object.freeze([...uniquePaths.values()]), censor });
+};
+
+/**
+ * Returns true for containers that can be cloned and traversed without
+ * changing special built-in semantics such as Buffer.toJSON or Date values.
+ * @param {*} value - Candidate structured container.
+ * @returns {boolean}
+ */
+const isRedactableContainer = (value) => {
+    if (!value || typeof value !== "object") {
+        return false;
+    }
+    if (Array.isArray(value) || isError(value)) {
+        return true;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+};
+
+/**
+ * Clones the enumerable portion of a value before redaction so logger policy
+ * never mutates application-owned objects. Circular references are preserved
+ * for the JSON replacer to handle.
+ * @param {*} value - Value to clone.
+ * @param {WeakMap<object, object>} [seen] - Previously cloned object identities.
+ * @returns {*} Cloned value.
+ */
+const cloneRedactable = (value, seen = new WeakMap()) => {
+    if (!value || typeof value !== "object") {
+        return value;
+    }
+    if (seen.has(value)) {
+        return seen.get(value);
+    }
+    if (!isRedactableContainer(value)) {
+        return value;
+    }
+
+    const clone = Array.isArray(value) ? new Array(value.length) : {};
+    seen.set(value, clone);
+    const source = isError(value) ? serializeError(value) : value;
+    for (const [key, entry] of Object.entries(source)) {
+        Object.defineProperty(clone, key, {
+            configurable: true,
+            enumerable: true,
+            value: cloneRedactable(entry, seen),
+            writable: true,
+        });
+    }
+    return clone;
+};
+
+/**
+ * Applies one compiled redaction path to a cloned object graph.
+ * @param {*} value - Current graph node.
+ * @param {Array<string>} segments - Compiled path segments.
+ * @param {number} index - Current segment index.
+ * @param {string} censor - Replacement text.
+ * @returns {void}
+ */
+const redactAtPath = (value, segments, index, censor) => {
+    if (!isRedactableContainer(value)) {
+        return;
+    }
+
+    const segment = segments[index];
+    const keys = segment === "*" ? Object.keys(value) : [segment];
+    for (const key of keys) {
+        if (!Object.hasOwn(value, key)) {
+            continue;
+        }
+        if (index === segments.length - 1) {
+            Object.defineProperty(value, key, {
+                configurable: true,
+                enumerable: true,
+                value: censor,
+                writable: true,
+            });
+        } else {
+            redactAtPath(value[key], segments, index + 1, censor);
+        }
+    }
+};
+
+/**
+ * Returns a redacted clone of a structured value.
+ * @param {*} value - Structured value to redact.
+ * @param {{paths: Array<Array<string>>, censor: string}|null} redaction - Compiled policy.
+ * @returns {*} Redacted clone, or the original value when redaction is disabled.
+ */
+const redactValue = (value, redaction) => {
+    if (!redaction) {
+        return value;
+    }
+    const clone = cloneRedactable(value);
+    for (const segments of redaction.paths) {
+        redactAtPath(clone, segments, 0, redaction.censor);
+    }
+    return clone;
+};
+
 /**
  * Runs callback with merged AsyncLocalStorage bindings for request correlation.
  * @param {object} bindings - Context bindings to expose to log calls.
@@ -283,7 +443,7 @@ const splitStructuredArgs = (args) => {
  * @param {object} options - Log record inputs.
  * @returns {string}
  */
-const buildJsonLine = ({ tag, pid, prefix, args, bindings }) => {
+const buildJsonLine = ({ tag, pid, prefix, args, bindings, redaction }) => {
     const error = args.find(isError);
     const { fields, messageArgs } = splitStructuredArgs(args);
 
@@ -307,7 +467,7 @@ const buildJsonLine = ({ tag, pid, prefix, args, bindings }) => {
         record.err = error;
     }
 
-    return JSON.stringify(record, createJsonReplacer());
+    return JSON.stringify(redactValue(record, redaction), createJsonReplacer());
 };
 
 /**
@@ -426,6 +586,8 @@ class Log {
      * @param {object} [options.bindings] - Static bindings for every log line.
      * @param {boolean} [options.sanitize=true] - Escape control characters in
      *   text-mode messages and binding values to prevent log-line forgery.
+     * @param {Array<string>|object} [options.redact] - Dot paths to redact, or
+     *   `{ paths, censor }` redaction options.
      * @param {string} [options.tag] - Explicit tag overriding the module-derived name.
      */
     constructor(mod, options = {}) {
@@ -461,6 +623,7 @@ class Log {
         this._levelOverride =
             this._levelOverrideName === null ? null : levels[this._levelOverrideName];
         this.sanitize = normalizedOptions.sanitize !== false;
+        this.redaction = normalizeRedaction(normalizedOptions.redact);
         this.throttle = new ErrorThrottle();
         this.bindings = normalizeBindings(normalizedOptions.bindings);
     }
@@ -536,6 +699,7 @@ class Log {
                     prefix,
                     args,
                     bindings: activeBindings,
+                    redaction: this.redaction,
                 }),
             );
             return;
@@ -558,9 +722,10 @@ class Log {
         if (this.tag) {
             message.push(bracket(this.tag));
         }
-        if (activeBindings) {
+        const outputBindings = redactValue(activeBindings, this.redaction);
+        if (outputBindings) {
             const parts = [];
-            for (const [k, v] of Object.entries(activeBindings)) {
+            for (const [k, v] of Object.entries(outputBindings)) {
                 parts.push(
                     this.sanitize
                         ? `${sanitizeControlChars(k)}=${sanitizeControlChars(v)}`
@@ -571,7 +736,12 @@ class Log {
                 message.push(bracket(parts.join(" ")));
             }
         }
-        const formatted = util.format(...args);
+        const outputArgs = this.redaction
+            ? args.map((arg) =>
+                  !isError(arg) && isBindingObject(arg) ? redactValue(arg, this.redaction) : arg,
+              )
+            : args;
+        const formatted = util.format(...outputArgs);
         message.push(this.sanitize ? sanitizeControlChars(formatted) : formatted);
 
         console[stdio](message.join(" "));
@@ -678,6 +848,7 @@ class Log {
 
         // Children share their parent's throttle budget by contract.
         child.throttle = this.throttle;
+        child.redaction = this.redaction;
         return child;
     }
 }

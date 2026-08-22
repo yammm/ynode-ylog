@@ -4,6 +4,7 @@ const options: YlogOptions = {
     level: "info",
     format: "json",
     bindings: { service: "type-consumer" },
+    redact: { paths: ["authorization", "user.password", "cards.*.cvv"], censor: "***" },
 };
 const log: Logger = ylog(import.meta, options);
 

@@ -10,6 +10,14 @@ export interface LogMethod {
     (...args: unknown[]): void;
 }
 
+export interface RedactOptions {
+    /** Dot-delimited field paths. A `*` segment matches every field or array item. */
+    paths: readonly string[];
+
+    /** Replacement text written at each matching path. @default "[Redacted]" */
+    censor?: string;
+}
+
 export interface YlogOptions {
     /**
      * Named log level threshold.
@@ -47,6 +55,12 @@ export interface YlogOptions {
      * @default true
      */
     sanitize?: boolean;
+
+    /**
+     * Secret fields to redact in bindings and structured payloads. The array
+     * shorthand uses the default censor; the object form can customize it.
+     */
+    redact?: readonly string[] | RedactOptions;
 
     /**
      * Explicit tag overriding the module-derived name.
