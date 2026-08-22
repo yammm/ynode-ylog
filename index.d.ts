@@ -4,6 +4,12 @@ export type LogLevel =
 export type LogFormat = "text" | "json";
 export type LogBindings = Record<string, unknown>;
 
+export interface LogMethod {
+    /** Pino-style object-first call; fields become top-level JSON properties. */
+    (fields: LogBindings, message?: string, ...args: unknown[]): void;
+    (...args: unknown[]): void;
+}
+
 export interface YlogOptions {
     /**
      * Named log level threshold.
@@ -72,13 +78,13 @@ export interface Logger {
     get level(): LogLevel;
     /** Sets an override, or clears it with null/undefined to follow the global level. */
     set level(value: LogLevel | null | undefined);
-    fatal(...args: unknown[]): void;
-    error(...args: unknown[]): void;
-    warn(...args: unknown[]): void;
-    info(...args: unknown[]): void;
-    debug(...args: unknown[]): void;
-    verbose(...args: unknown[]): void;
-    trace(...args: unknown[]): void;
+    fatal: LogMethod;
+    error: LogMethod;
+    warn: LogMethod;
+    info: LogMethod;
+    debug: LogMethod;
+    verbose: LogMethod;
+    trace: LogMethod;
     silent(...args: unknown[]): void;
     /**
      * Creates a derived logger that prepends the given bindings to every log line.

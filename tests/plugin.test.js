@@ -310,6 +310,63 @@ describe("structured logging and context", () => {
         assert.match(record.time, /^\d{4}-\d{2}-\d{2}T/);
     });
 
+    test("format json promotes object-first payloads to searchable fields", (t) => {
+        const lines = [];
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => lines.push(JSON.parse(line));
+
+        const log = ylog(
+            { filename: "json-fields.js" },
+            { format: "json", bindings: { service: "api", shared: "binding" } },
+        );
+        log.info(
+            {
+                orderId: "ord-123",
+                elapsedMs: 17,
+                shared: "call",
+                time: "fake-time",
+                level: "fake-level",
+                tag: "fake-tag",
+                msg: "fake-message",
+            },
+            "processed %d item",
+            1,
+        );
+
+        assert.strictEqual(lines.length, 1);
+        assert.strictEqual(lines[0].service, "api");
+        assert.strictEqual(lines[0].orderId, "ord-123");
+        assert.strictEqual(lines[0].elapsedMs, 17);
+        assert.strictEqual(lines[0].shared, "call");
+        assert.strictEqual(lines[0].level, "info");
+        assert.strictEqual(lines[0].tag, "json-fields");
+        assert.strictEqual(lines[0].msg, "processed 1 item");
+        assert.match(lines[0].time, /^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    test("format json supports object-only records and nested errors", (t) => {
+        const lines = [];
+        const originalError = console.error;
+        t.after(() => {
+            console.error = originalError;
+        });
+        console.error = (line) => lines.push(JSON.parse(line));
+
+        const error = new Error(uniqueKey("nested-error"));
+        const payload = { event: "failed", err: error };
+        payload.self = payload;
+        const log = ylog({ filename: "json-object-only.js" }, { format: "json" });
+        log.error(payload);
+
+        assert.strictEqual(lines[0].event, "failed");
+        assert.strictEqual(lines[0].msg, "");
+        assert.strictEqual(lines[0].err.message, error.message);
+        assert.strictEqual(lines[0].self.self, "[Circular]");
+    });
+
     test("format json serializes errors and BigInt bindings safely", (t) => {
         const lines = [];
         const originalError = console.error;

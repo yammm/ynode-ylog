@@ -261,20 +261,40 @@ const createJsonReplacer = () => {
 };
 
 /**
+ * Splits a Pino-style object-first call into structured fields and message
+ * arguments. Text output deliberately keeps its existing util.format behavior;
+ * this normalization is used only by JSON records.
+ * @param {Array<*>} args - Arguments supplied to a log method.
+ * @returns {{ fields: object|null, messageArgs: Array<*> }} Structured fields and message args.
+ */
+const splitStructuredArgs = (args) => {
+    const first = args[0];
+    if (!isError(first) && isBindingObject(first)) {
+        return {
+            fields: normalizeBindings(first),
+            messageArgs: args.slice(1),
+        };
+    }
+    return { fields: null, messageArgs: args };
+};
+
+/**
  * Builds a structured JSON log line.
  * @param {object} options - Log record inputs.
  * @returns {string}
  */
 const buildJsonLine = ({ tag, pid, prefix, args, bindings }) => {
     const error = args.find(isError);
+    const { fields, messageArgs } = splitStructuredArgs(args);
 
     // Error stacks live solely in the structured `err` field regardless of
     // argument order. `msg` uses each Error's message so mixed context/error
     // calls remain readable without duplicating a stack.
-    const msgArgs = args.map((arg) => (isError(arg) ? arg.message : arg));
+    const msgArgs = messageArgs.map((arg) => (isError(arg) ? arg.message : arg));
 
     const record = {
         ...(bindings ?? {}),
+        ...(fields ?? {}),
         time: new Date().toISOString(),
         level: prefix ? prefix.toLowerCase() : "info",
         tag,

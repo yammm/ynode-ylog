@@ -12,6 +12,7 @@ log.level = "debug";
 log.level = null;
 log.level = undefined;
 log.error(new Error("boom"), "request failed");
+log.info({ orderId: "ord-123", elapsedMs: 17 }, "processed %d item", 1);
 
 const child: Logger = log.child({ requestId: "abc" }, { level: "warn" });
 const contextResult: Promise<number> = ylog.withContext({ requestId: "abc" }, async () => 42);

@@ -74,6 +74,8 @@ requestLog.error("Request failed");
 
 Set `format: "json"` (or its shorthand alias `json: true`) to emit one JSON object per log call. Static logger bindings and active async context bindings are added as top-level fields, with core fields such as `time`, `level`, `tag`, `msg`, and enabled `pid` output protected from being overwritten.
 
+JSON loggers also support Pino-style object-first calls. Enumerable properties from the first object become searchable top-level fields instead of being folded into `msg`; call fields override context/logger bindings with the same name, while protected core fields always win. Text output retains its existing `util.format` rendering.
+
 ```javascript
 const log = ylog(import.meta, {
     format: "json",
@@ -81,7 +83,7 @@ const log = ylog(import.meta, {
 });
 
 await ylog.withContext({ reqId: "abc123" }, async () => {
-    log.info("Request started");
+    log.info({ route: "/orders", elapsedMs: 17 }, "Request completed");
 });
 ```
 
