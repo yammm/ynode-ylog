@@ -91,6 +91,8 @@ Use `ylog.getContext()` to read the current context bindings inside the active a
 
 Duplicate `error` and `warn` messages are limited to two emissions per 30-second window. Budgets are isolated by root logger and severity; derived child loggers share their parent's budget. Messages filtered by the active log level do not consume a budget, and `fatal` messages are never throttled.
 
+The throttle key is derived from an `Error` argument's `code` or `message`, or from a sole primitive argument. Multi-argument format-string calls without an `Error` (for example `log.error("failed %s", id)`) have no stable key and are exempt from throttling, as are sole object arguments — object identity is never used as a key.
+
 ## Output Formatting
 
 TTY output includes a local timestamp and uses colors when the destination stream supports them. Non-TTY output uses syslog severity prefixes suitable for journald. Stdout and stderr capabilities are detected independently, so redirecting one stream does not affect the other's formatting.
