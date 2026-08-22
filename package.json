@@ -1,6 +1,6 @@
 {
     "name": "@ynode/ylog",
-    "version": "1.7.0+336791",
+    "version": "1.7.0+336792",
     "description": "Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with Fastify or standalone.",
     "main": "src/plugin.js",
     "types": "index.d.ts",
@@ -54,7 +54,7 @@
         "typescript": "^7.0.2"
     },
     "scripts": {
-        "changelog": "auto-changelog -p",
+        "changelog": "auto-changelog -p --commit-limit false",
         "docs": "node scripts/gen-docs.mjs",
         "docs:clean": "rimraf docs || rmdir /s /q docs 2> NUL || true",
         "docs:open": "node -e \"import('node:child_process').then(m=>m.exec(process.platform==='win32'?'start docs/index.html':(process.platform==='darwin'?'open docs/index.html':'xdg-open docs/index.html')))\"",
