@@ -18,6 +18,32 @@ export interface RedactOptions {
     censor?: string;
 }
 
+export interface ThrottleOptions {
+    /** Number of matching calls emitted before later duplicates are suppressed. @default 2 */
+    max?: number;
+
+    /** Suppression window measured from the last emitted matching call. @default 30000 */
+    windowMs?: number;
+
+    /** Emit a recovery record with the suppressed count when the keyed message resumes. @default false */
+    summary?: boolean;
+}
+
+export interface ThrottleDecision {
+    /** Whether the current call should be suppressed. */
+    throttled: boolean;
+
+    /** Calls suppressed in the prior window when the current call resumes output. */
+    suppressed: number;
+
+    /** Expired counts aggregated by scope during bounded periodic cleanup. */
+    recoveries: ReadonlyArray<{
+        scope: string;
+        suppressed: number;
+        recoveredKeys: number;
+    }>;
+}
+
 export interface YlogOptions {
     /**
      * Named log level threshold.
@@ -61,6 +87,9 @@ export interface YlogOptions {
      * shorthand uses the default censor; the object form can customize it.
      */
     redact?: readonly string[] | RedactOptions;
+
+    /** Duplicate `error`/`warn` policy, or false to disable throttling. */
+    throttle?: false | ThrottleOptions;
 
     /**
      * Explicit tag overriding the module-derived name.
@@ -144,6 +173,7 @@ export interface CreateLogger {
         max?: number,
         windowMs?: number,
     ) => {
+        check(key: string, scope?: string): ThrottleDecision;
         shouldThrottle(key: string): boolean;
     };
 }

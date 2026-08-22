@@ -109,7 +109,17 @@ For the default `"[Redacted]"` censor, use the array shorthand: `redact: ["autho
 
 ## Duplicate Throttling
 
-Duplicate `error` and `warn` messages are limited to two emissions per 30-second window. Budgets are isolated by root logger and severity; derived child loggers share their parent's budget. Messages filtered by the active log level do not consume a budget, and `fatal` messages are never throttled.
+Duplicate `error` and `warn` messages default to two emissions per 30-second window. Configure the budget and duration with `throttle`; pass `false` to disable throttling entirely.
+
+```javascript
+const log = ylog(import.meta, {
+    throttle: { max: 5, windowMs: 10_000, summary: true },
+});
+```
+
+Recovery summaries are opt-in (`summary` defaults to `false`) so the default output remains unchanged. With summaries enabled, a matching call after the window receives its exact `suppressed` count immediately before the resumed message. Bounded periodic cleanup aggregates other expired keys into at most one summary per severity, reporting `recoveredKeys` and the total `suppressed` count rather than emitting one record per key. JSON summaries include `event: "ylog.throttle.recovered"`, `throttleLevel`, and `throttleWindowMs`; potentially sensitive throttle keys are never emitted.
+
+Budgets are isolated by root logger and severity; derived child loggers share their parent's configured budget. Messages filtered by the active log level do not consume a budget, and `fatal` messages are never throttled. `max` and `windowMs` must be positive safe integers.
 
 The throttle key is derived from an `Error` argument's `code` or `message`, or from a sole primitive argument. Multi-argument format-string calls without an `Error` (for example `log.error("failed %s", id)`) have no stable key and are exempt from throttling, as are sole object arguments — object identity is never used as a key.
 

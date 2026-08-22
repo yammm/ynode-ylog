@@ -785,6 +785,240 @@ describe("throttle mechanism", () => {
         assert.strictEqual(errorCalls, 2, "exactly 2 calls should pass through before throttling");
     });
 
+    test("supports configured budgets and fully disabling throttling", (t) => {
+        const lines = [];
+        const originalError = console.error;
+        t.after(() => {
+            console.error = originalError;
+        });
+        console.error = (line) => lines.push(line);
+
+        const limited = ylog(
+            { filename: "configured-throttle.js" },
+            { throttle: { max: 1, windowMs: 10_000 } },
+        );
+        const limitedChild = limited.child({ scope: "child" });
+        const disabled = ylog({ filename: "disabled-throttle.js" }, { throttle: false });
+        const limitedMessage = uniqueKey("configured-budget");
+        const disabledMessage = uniqueKey("disabled-budget");
+
+        limited.error(limitedMessage);
+        limitedChild.error(limitedMessage);
+        limitedChild.error(limitedMessage);
+        disabled.error(disabledMessage);
+        disabled.error(disabledMessage);
+        disabled.error(disabledMessage);
+
+        assert.strictEqual(lines.length, 4);
+        assert.ok(lines[0].includes(limitedMessage));
+        assert.ok(lines.slice(1).every((line) => line.includes(disabledMessage)));
+    });
+
+    test("preserves default output by keeping recovery summaries opt-in", (t) => {
+        let now = 1_000;
+        const lines = [];
+        const originalNow = Date.now;
+        const originalError = console.error;
+        t.after(() => {
+            Date.now = originalNow;
+            console.error = originalError;
+        });
+        Date.now = () => now;
+        console.error = (line) => lines.push(line);
+
+        const log = ylog({ filename: "default-throttle-recovery.js" });
+        const message = uniqueKey("default-recovery");
+
+        log.error(message);
+        log.error(message);
+        log.error(message);
+        now = 31_001;
+        log.error(message);
+
+        assert.strictEqual(lines.length, 3);
+        assert.ok(lines.every((line) => line.includes(message)));
+        assert.ok(lines.every((line) => !line.includes("Recovered after suppressing")));
+    });
+
+    test("emits an exact structured recovery summary before logging resumes", (t) => {
+        let now = 1_000;
+        const lines = [];
+        const originalNow = Date.now;
+        const originalError = console.error;
+        t.after(() => {
+            Date.now = originalNow;
+            console.error = originalError;
+        });
+        Date.now = () => now;
+        console.error = (line) => lines.push(JSON.parse(line));
+
+        const log = ylog(
+            { filename: "throttle-recovery.js" },
+            {
+                format: "json",
+                throttle: { max: 1, windowMs: 100, summary: true },
+            },
+        );
+        const message = uniqueKey("recovered-error");
+
+        log.error(message);
+        now = 1_050;
+        log.error(message);
+        log.error(message);
+        log.error(message);
+        now = 1_101;
+        log.error(message);
+
+        assert.strictEqual(lines.length, 3);
+        assert.strictEqual(lines[0].msg, message);
+        assert.deepStrictEqual(
+            {
+                event: lines[1].event,
+                level: lines[1].level,
+                msg: lines[1].msg,
+                recoveredKeys: lines[1].recoveredKeys,
+                suppressed: lines[1].suppressed,
+                throttleLevel: lines[1].throttleLevel,
+                throttleWindowMs: lines[1].throttleWindowMs,
+            },
+            {
+                event: "ylog.throttle.recovered",
+                level: "error",
+                msg: "Recovered after suppressing 3 duplicate error messages",
+                recoveredKeys: 1,
+                suppressed: 3,
+                throttleLevel: "error",
+                throttleWindowMs: 100,
+            },
+        );
+        assert.strictEqual(lines[2].msg, message);
+    });
+
+    test("periodic cleanup aggregates many expired keys by severity", (t) => {
+        let now = 1_000;
+        const errorLines = [];
+        const warnLines = [];
+        const originalNow = Date.now;
+        const originalInterval = ylog.ErrorThrottle.EVICT_INTERVAL;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        t.after(() => {
+            Date.now = originalNow;
+            ylog.ErrorThrottle.EVICT_INTERVAL = originalInterval;
+            console.error = originalError;
+            console.warn = originalWarn;
+        });
+        Date.now = () => now;
+        const keysPerLevel = 12;
+        ylog.ErrorThrottle.EVICT_INTERVAL = keysPerLevel * 4 + 1;
+        console.error = (line) => errorLines.push(JSON.parse(line));
+        console.warn = (line) => warnLines.push(JSON.parse(line));
+
+        const log = ylog(
+            { filename: "throttle-cleanup.js" },
+            {
+                format: "json",
+                level: "warn",
+                throttle: { max: 1, windowMs: 100, summary: true },
+            },
+        );
+        const sensitiveKeys = [];
+
+        for (let index = 0; index < keysPerLevel; ++index) {
+            const errorKey = uniqueKey(`secret-error-key-${index}`);
+            const warnKey = uniqueKey(`secret-warn-key-${index}`);
+            sensitiveKeys.push(errorKey, warnKey);
+            log.error(errorKey);
+            log.error(errorKey);
+            log.warn(warnKey);
+            log.warn(warnKey);
+        }
+        now = 1_101;
+        log.error(uniqueKey("other-error"));
+
+        const errorSummaries = errorLines.filter(
+            ({ event }) => event === "ylog.throttle.recovered",
+        );
+        const warnSummaries = warnLines.filter(({ event }) => event === "ylog.throttle.recovered");
+        assert.strictEqual(errorSummaries.length, 1);
+        assert.strictEqual(warnSummaries.length, 1);
+        assert.deepStrictEqual(
+            {
+                recoveredKeys: errorSummaries[0].recoveredKeys,
+                suppressed: errorSummaries[0].suppressed,
+                throttleLevel: errorSummaries[0].throttleLevel,
+            },
+            { recoveredKeys: keysPerLevel, suppressed: keysPerLevel, throttleLevel: "error" },
+        );
+        assert.deepStrictEqual(
+            {
+                recoveredKeys: warnSummaries[0].recoveredKeys,
+                suppressed: warnSummaries[0].suppressed,
+                throttleLevel: warnSummaries[0].throttleLevel,
+            },
+            { recoveredKeys: keysPerLevel, suppressed: keysPerLevel, throttleLevel: "warn" },
+        );
+        const summaries = JSON.stringify([...errorSummaries, ...warnSummaries]);
+        assert.ok(sensitiveKeys.every((key) => !summaries.includes(key)));
+    });
+
+    test("can resume without a recovery summary", (t) => {
+        let now = 1_000;
+        const lines = [];
+        const originalNow = Date.now;
+        const originalError = console.error;
+        t.after(() => {
+            Date.now = originalNow;
+            console.error = originalError;
+        });
+        Date.now = () => now;
+        console.error = (line) => lines.push(line);
+
+        const log = ylog(
+            { filename: "quiet-throttle-recovery.js" },
+            { throttle: { max: 1, windowMs: 100, summary: false } },
+        );
+        const message = uniqueKey("quiet-recovery");
+
+        log.error(message);
+        log.error(message);
+        now = 1_101;
+        log.error(message);
+
+        assert.strictEqual(lines.length, 2);
+        assert.ok(lines.every((line) => line.includes(message)));
+    });
+
+    test("rejects malformed throttle policies and direct throttle inputs", () => {
+        const invalidPolicies = [
+            [null, /throttle must be false or an options object/],
+            [true, /throttle must be false or an options object/],
+            [[], /throttle must be false or an options object/],
+            [new Date(), /throttle must be false or an options object/],
+            [{ extra: true }, /throttle has unknown option: extra/],
+            [{ max: 0 }, /throttle\.max must be a positive safe integer/],
+            [{ max: null }, /throttle\.max must be a positive safe integer/],
+            [{ max: 1.5 }, /throttle\.max must be a positive safe integer/],
+            [{ max: Number.MAX_SAFE_INTEGER + 1 }, /throttle\.max must be a positive safe integer/],
+            [{ windowMs: 0 }, /throttle\.windowMs must be a positive safe integer/],
+            [{ windowMs: null }, /throttle\.windowMs must be a positive safe integer/],
+            [{ summary: "yes" }, /throttle\.summary must be a boolean/],
+        ];
+
+        for (const [throttle, expected] of invalidPolicies) {
+            assert.throws(() => ylog({ filename: "invalid-throttle.js" }, { throttle }), expected);
+        }
+        assert.throws(() => new ylog.ErrorThrottle(0, 100), /throttle\.max/);
+        assert.throws(() => new ylog.ErrorThrottle(1, 0), /throttle\.windowMs/);
+        const throttle = new ylog.ErrorThrottle();
+        assert.throws(() => throttle.check(""), /throttle key must be a non-empty string/);
+        assert.throws(() => throttle.check("key", null), /throttle scope must be a string/);
+        assert.throws(
+            () => throttle.shouldThrottle(null),
+            /throttle key must be a non-empty string/,
+        );
+    });
+
     test("does not throttle distinct errors", (t) => {
         const log = ylog({ filename: "test.js" });
         let errorCalls = 0;

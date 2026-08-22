@@ -94,6 +94,23 @@ const colors = {
     gray: util.inspect.colors.gray,
 };
 
+const DEFAULT_THROTTLE_MAX = 2;
+const DEFAULT_THROTTLE_WINDOW_MS = 30 * 1000;
+const THROTTLE_OPTION_KEYS = new Set(["max", "windowMs", "summary"]);
+
+/**
+ * Requires a positive safe integer for a throttle limit or duration.
+ * @param {*} value - Candidate option value.
+ * @param {string} name - Public option name for deterministic errors.
+ * @returns {number} Validated integer.
+ */
+const validateThrottleInteger = (value, name) => {
+    if (!Number.isSafeInteger(value) || value < 1) {
+        throw new TypeError(`@ynode/ylog ${name} must be a positive safe integer`);
+    }
+    return value;
+};
+
 class ErrorThrottle {
     /**
      * Number of shouldThrottle calls between stale-entry eviction sweeps.
@@ -105,22 +122,47 @@ class ErrorThrottle {
      * @param {number} [max=2] - Maximum calls allowed before suppression.
      * @param {number} [windowMs=30000] - Window duration in milliseconds.
      */
-    constructor(max = 2, windowMs = 30 * 1000) {
-        this.max = max;
-        this.throttle = windowMs;
+    constructor(max = DEFAULT_THROTTLE_MAX, windowMs = DEFAULT_THROTTLE_WINDOW_MS) {
+        this.max = validateThrottleInteger(max, "throttle.max");
+        this.throttle = validateThrottleInteger(windowMs, "throttle.windowMs");
         this.map = new Map();
         this.callsSinceEvict = 0;
     }
 
     /**
-     * Returns true when the given key has exceeded the max call threshold
-     * within the throttle window and should be suppressed. Suppressed calls do
-     * not extend the window; it expires relative to the last allowed call.
+     * Evaluates one keyed call and reports both suppression and any recovered
+     * count from the previous window. Suppressed calls do not extend the
+     * window; it expires relative to the last allowed call.
      * @param {string} key - Deduplication key (typically error code or message).
-     * @returns {boolean}
+     * @param {string} [scope=""] - Optional independent budget scope.
+     * @returns {{throttled: boolean, suppressed: number, recoveries: Array<{scope: string, suppressed: number, recoveredKeys: number}>}}
      */
-    shouldThrottle(key) {
+    check(key, scope = "") {
+        if (typeof key !== "string" || !key) {
+            throw new TypeError("@ynode/ylog throttle key must be a non-empty string");
+        }
+        if (typeof scope !== "string") {
+            throw new TypeError("@ynode/ylog throttle scope must be a string");
+        }
         const now = Date.now();
+        const scopedKey = scope ? `${scope}\0${key}` : key;
+        const rec = this.map.get(scopedKey);
+        let decision;
+        const recoveryScopes = new Map();
+
+        if (!rec || now - rec.last > this.throttle) {
+            decision = { throttled: false, suppressed: rec?.suppressed ?? 0 };
+            this.map.set(scopedKey, { count: 1, last: now, scope, suppressed: 0 });
+        } else {
+            ++rec.count;
+            if (rec.count <= this.max) {
+                rec.last = now;
+                decision = { throttled: false, suppressed: 0 };
+            } else {
+                ++rec.suppressed;
+                decision = { throttled: true, suppressed: 0 };
+            }
+        }
 
         // Periodic eviction of stale entries to prevent unbounded Map growth.
         if (++this.callsSinceEvict >= ErrorThrottle.EVICT_INTERVAL) {
@@ -128,21 +170,30 @@ class ErrorThrottle {
             for (const [k, rec] of this.map) {
                 if (now - rec.last > this.throttle) {
                     this.map.delete(k);
+                    if (rec.suppressed) {
+                        const recovery = recoveryScopes.get(rec.scope) ?? {
+                            scope: rec.scope,
+                            suppressed: 0,
+                            recoveredKeys: 0,
+                        };
+                        recovery.suppressed += rec.suppressed;
+                        ++recovery.recoveredKeys;
+                        recoveryScopes.set(rec.scope, recovery);
+                    }
                 }
             }
         }
 
-        const rec = this.map.get(key);
-        if (!rec || now - rec.last > this.throttle) {
-            this.map.set(key, { count: 1, last: now });
-            return false;
-        }
-        ++rec.count;
-        if (rec.count <= this.max) {
-            rec.last = now;
-            return false;
-        }
-        return true;
+        return { ...decision, recoveries: [...recoveryScopes.values()] };
+    }
+
+    /**
+     * Backward-compatible boolean suppression check.
+     * @param {string} key - Deduplication key.
+     * @returns {boolean}
+     */
+    shouldThrottle(key) {
+        return this.check(key).throttled;
     }
 }
 
@@ -180,6 +231,49 @@ const normalizeBindings = (bindings) => {
         return null;
     }
     return { ...bindings };
+};
+
+/**
+ * Validates public duplicate-throttle configuration.
+ * @param {false|object|undefined} throttle - Throttle options or false to disable.
+ * @returns {{max: number, windowMs: number, summary: boolean}|null} Normalized policy.
+ */
+const normalizeThrottle = (throttle) => {
+    if (throttle === false) {
+        return null;
+    }
+    if (throttle !== undefined) {
+        const prototype =
+            throttle && typeof throttle === "object" ? Object.getPrototypeOf(throttle) : null;
+        if (
+            !throttle ||
+            typeof throttle !== "object" ||
+            Array.isArray(throttle) ||
+            (prototype !== Object.prototype && prototype !== null)
+        ) {
+            throw new TypeError("@ynode/ylog throttle must be false or an options object");
+        }
+        const unknownKey = Object.keys(throttle)
+            .filter((key) => !THROTTLE_OPTION_KEYS.has(key))
+            .sort()[0];
+        if (unknownKey) {
+            throw new TypeError(`@ynode/ylog throttle has unknown option: ${unknownKey}`);
+        }
+    }
+
+    const options = throttle ?? {};
+    const max = validateThrottleInteger(
+        options.max === undefined ? DEFAULT_THROTTLE_MAX : options.max,
+        "throttle.max",
+    );
+    const windowMs = validateThrottleInteger(
+        options.windowMs === undefined ? DEFAULT_THROTTLE_WINDOW_MS : options.windowMs,
+        "throttle.windowMs",
+    );
+    if (options.summary !== undefined && typeof options.summary !== "boolean") {
+        throw new TypeError("@ynode/ylog throttle.summary must be a boolean");
+    }
+    return Object.freeze({ max, windowMs, summary: options.summary === true });
 };
 
 /**
@@ -588,6 +682,8 @@ class Log {
      *   text-mode messages and binding values to prevent log-line forgery.
      * @param {Array<string>|object} [options.redact] - Dot paths to redact, or
      *   `{ paths, censor }` redaction options.
+     * @param {false|object} [options.throttle] - Duplicate `error`/`warn`
+     *   policy, or false to disable throttling.
      * @param {string} [options.tag] - Explicit tag overriding the module-derived name.
      */
     constructor(mod, options = {}) {
@@ -624,7 +720,10 @@ class Log {
             this._levelOverrideName === null ? null : levels[this._levelOverrideName];
         this.sanitize = normalizedOptions.sanitize !== false;
         this.redaction = normalizeRedaction(normalizedOptions.redact);
-        this.throttle = new ErrorThrottle();
+        this.throttlePolicy = normalizeThrottle(normalizedOptions.throttle);
+        this.throttle = this.throttlePolicy
+            ? new ErrorThrottle(this.throttlePolicy.max, this.throttlePolicy.windowMs)
+            : null;
         this.bindings = normalizeBindings(normalizedOptions.bindings);
     }
 
@@ -748,6 +847,70 @@ class Log {
     }
 
     /**
+     * Emits an unthrottled recovery summary immediately before a keyed message
+     * resumes after its throttle window.
+     * @param {string} prefix - Label prefix (ERROR or WARN).
+     * @param {number} level - Numeric log level threshold.
+     * @param {Array<number>} color - ANSI color pair.
+     * @param {number} suppressed - Number of calls suppressed in the prior window.
+     * @param {number} [recoveredKeys=1] - Number of keys represented by the summary.
+     */
+    emitThrottleSummary(prefix, level, color, suppressed, recoveredKeys = 1) {
+        const throttleLevel = prefix.toLowerCase();
+        const noun = suppressed === 1 ? "message" : "messages";
+        const message =
+            recoveredKeys === 1
+                ? `Recovered after suppressing ${suppressed} duplicate ${throttleLevel} ${noun}`
+                : `Recovered ${recoveredKeys} throttle keys after suppressing ${suppressed} duplicate ${throttleLevel} ${noun}`;
+
+        if (this.format === "json") {
+            this.log(
+                prefix,
+                level,
+                [
+                    {
+                        event: "ylog.throttle.recovered",
+                        recoveredKeys,
+                        suppressed,
+                        throttleLevel,
+                        throttleWindowMs: this.throttlePolicy.windowMs,
+                    },
+                    message,
+                ],
+                color,
+            );
+            return;
+        }
+        this.log(prefix, level, [`${message} (${this.throttlePolicy.windowMs} ms window)`], color);
+    }
+
+    /**
+     * Emits summaries for expired entries discovered by periodic cleanup.
+     * @param {Array<{scope: string, suppressed: number, recoveredKeys: number}>} recoveries - Aggregated expired keyed counts.
+     */
+    emitThrottleRecoveries(recoveries) {
+        for (const recovery of recoveries) {
+            if (recovery.scope === "ERROR") {
+                this.emitThrottleSummary(
+                    recovery.scope,
+                    levels.error,
+                    colors.red,
+                    recovery.suppressed,
+                    recovery.recoveredKeys,
+                );
+            } else if (recovery.scope === "WARN") {
+                this.emitThrottleSummary(
+                    recovery.scope,
+                    levels.warn,
+                    colors.yellow,
+                    recovery.suppressed,
+                    recovery.recoveredKeys,
+                );
+            }
+        }
+    }
+
+    /**
      * Emits a throttled message after checking its log level. Throttle keys are
      * isolated by root logger and severity so one logger or level cannot consume
      * another logger's error budget. Child loggers share their parent's budget.
@@ -765,9 +928,17 @@ class Log {
         }
 
         const key = extractKey(args);
-        const scopedKey = key ? `${prefix}\0${key}` : null;
-        if (scopedKey && this.throttle.shouldThrottle(scopedKey)) {
-            return;
+        if (key && this.throttle) {
+            const decision = this.throttle.check(String(key), prefix);
+            if (this.throttlePolicy.summary) {
+                this.emitThrottleRecoveries(decision.recoveries);
+                if (decision.suppressed) {
+                    this.emitThrottleSummary(prefix, level, color, decision.suppressed);
+                }
+            }
+            if (decision.throttled) {
+                return;
+            }
         }
         this.log(prefix, level, args, color);
     }
@@ -848,6 +1019,7 @@ class Log {
 
         // Children share their parent's throttle budget by contract.
         child.throttle = this.throttle;
+        child.throttlePolicy = this.throttlePolicy;
         child.redaction = this.redaction;
         return child;
     }
