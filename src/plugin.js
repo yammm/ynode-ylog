@@ -54,8 +54,6 @@ const levels = Object.freeze({
     verbose: 4,
 });
 
-const levelNames = Object.fromEntries(Object.entries(levels).map(([name, value]) => [value, name]));
-
 const syslogPrefix = {
     0: "<3>",
     1: "<4>",
@@ -64,7 +62,8 @@ const syslogPrefix = {
     4: "<7>",
 };
 
-let appLogLevel = process.env.NODE_ENV !== "production" ? levels.debug : levels.info;
+let appLogLevelName = process.env.NODE_ENV !== "production" ? "debug" : "info";
+let appLogLevel = levels[appLogLevelName];
 let useSyslogPrefix = true;
 const contextStore = new AsyncLocalStorage();
 
@@ -356,9 +355,11 @@ class Log {
             normalizedOptions.format === "json" || normalizedOptions.json === true
                 ? "json"
                 : "text";
-        this._levelOverride = Object.hasOwn(levels, normalizedOptions.level)
-            ? levels[normalizedOptions.level]
+        this._levelOverrideName = Object.hasOwn(levels, normalizedOptions.level)
+            ? normalizedOptions.level
             : null;
+        this._levelOverride =
+            this._levelOverrideName === null ? null : levels[this._levelOverrideName];
         this.throttle = new ErrorThrottle();
         this.bindings = normalizeBindings(normalizedOptions.bindings);
     }
@@ -368,9 +369,14 @@ class Log {
         return this._levelOverride ?? appLogLevel;
     }
 
-    /** Fastify/Pino-compatible named log level. @returns {string} */
+    /**
+     * Fastify/Pino-compatible named log level. Reports the exact name that was
+     * requested, so aliases such as `fatal` and `trace` round-trip even though
+     * they share a numeric rank with `error` and `verbose`.
+     * @returns {string}
+     */
     get level() {
-        return levelNames[this.levelValue];
+        return this._levelOverrideName ?? appLogLevelName;
     }
 
     /**
@@ -379,6 +385,7 @@ class Log {
      */
     set level(level) {
         if (Object.hasOwn(levels, level)) {
+            this._levelOverrideName = level;
             this._levelOverride = levels[level];
         }
     }
@@ -529,9 +536,11 @@ class Log {
         child.tag = this.tag;
         child.pid = this.pid;
         child.format = this.format;
+        child._levelOverrideName = this._levelOverrideName;
         child._levelOverride = this._levelOverride;
         child.throttle = this.throttle;
         if (options && typeof options === "object" && Object.hasOwn(levels, options.level)) {
+            child._levelOverrideName = options.level;
             child._levelOverride = levels[options.level];
         }
         if (options && typeof options === "object" && options.format === "json") {
@@ -565,6 +574,7 @@ function createLogger(mod, options) {
  */
 createLogger.loglevel = (level) => {
     if (Object.hasOwn(levels, level)) {
+        appLogLevelName = level;
         appLogLevel = levels[level];
     }
     return createLogger;

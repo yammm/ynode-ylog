@@ -164,8 +164,8 @@ describe("basic logging", () => {
         fatalChild.warn("hidden warning");
         fatalChild.fatal("visible fatal");
 
-        assert.strictEqual(traceChild.level, "verbose");
-        assert.strictEqual(fatalChild.level, "error");
+        assert.strictEqual(traceChild.level, "trace");
+        assert.strictEqual(fatalChild.level, "fatal");
         assert.strictEqual(output.length, 1);
         assert.strictEqual(warnings.length, 0);
         assert.strictEqual(errors.length, 1);
@@ -343,6 +343,41 @@ describe("log level option", () => {
 
         log.debug("this should print");
         assert.ok(called, "debug should emit at debug level");
+    });
+
+    test("level names round-trip while aliases keep their numeric rank", (t) => {
+        const fatalLog = ylog({ filename: "round-trip.js" }, { level: "fatal" });
+        const traceLog = ylog({ filename: "round-trip.js" }, { level: "trace" });
+        const warnings = [];
+        const errors = [];
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        t.after(() => {
+            console.warn = originalWarn;
+            console.error = originalError;
+        });
+        console.warn = (line) => warnings.push(line);
+        console.error = (line) => errors.push(line);
+
+        assert.strictEqual(fatalLog.level, "fatal");
+        assert.strictEqual(traceLog.level, "trace");
+
+        // fatal still maps to the error rank numerically.
+        fatalLog.warn("hidden");
+        fatalLog.error(uniqueKey("fatal-rank"));
+
+        assert.strictEqual(warnings.length, 0);
+        assert.strictEqual(errors.length, 1);
+    });
+
+    test("global level names round-trip through loglevel", (t) => {
+        const log = ylog({ filename: "global-name.js" });
+        t.after(restoreDefaultLevel);
+
+        ylog.loglevel("trace");
+
+        assert.strictEqual(ylog.defaultLevel, ylog.levels.verbose);
+        assert.strictEqual(log.level, "trace");
     });
 
     test("invalid level falls back to default", (t) => {

@@ -36,7 +36,7 @@ fastify.log.info(`Worker ${process.pid} shutting down due to inactivity.`);
 
 ## Log Levels
 
-The supported levels, from most restrictive to most verbose, are `silent`, `error`, `warn`, `info`, `debug`, and `verbose`. The standard Pino/Fastify names `fatal` and `trace` are accepted as aliases for `error` and `verbose`, respectively.
+The supported levels, from most restrictive to most verbose, are `silent`, `error`, `warn`, `info`, `debug`, and `verbose`. The standard Pino/Fastify names `fatal` and `trace` are numeric aliases: `fatal` shares the `error` rank and `trace` shares the `verbose` rank. `log.level` reports the exact name that was requested, so a logger created with `level: "fatal"` reports `"fatal"` while filtering messages at the `error` rank.
 
 ```javascript
 const log = ylog(import.meta);
