@@ -332,6 +332,27 @@ describe("structured logging and context", () => {
         assert.match(record.err.message, /json-error/);
     });
 
+    test("format json keeps the error stack solely in the err field", (t) => {
+        const lines = [];
+        const originalError = console.error;
+        t.after(() => {
+            console.error = originalError;
+        });
+        console.error = (line) => lines.push(line);
+
+        const log = ylog({ filename: "json-stack.js" }, { level: "error", format: "json" });
+        const error = new Error(uniqueKey("single-stack"));
+        log.error("request failed:", error);
+
+        const record = JSON.parse(lines[0]);
+        const stackFrame = error.stack.split("\n")[1].trim();
+        const occurrences = lines[0].split(stackFrame).length - 1;
+
+        assert.strictEqual(record.msg, `request failed: ${error.message}`);
+        assert.strictEqual(record.err.stack, error.stack);
+        assert.strictEqual(occurrences, 1, "stack must appear exactly once per record");
+    });
+
     test("withContext adds async request bindings without leaking", async (t) => {
         const lines = [];
         const originalLog = console.log;

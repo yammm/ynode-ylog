@@ -243,18 +243,27 @@ const createJsonReplacer = () => {
  * @returns {string}
  */
 const buildJsonLine = ({ tag, pid, prefix, args, bindings }) => {
+    const error = args.find(isError);
+
+    // When the final argument is an Error its stack lives solely in the
+    // structured `err` field; `msg` carries only the error message so the
+    // stack is not duplicated in every record.
+    let msgArgs = args;
+    const lastArg = args[args.length - 1];
+    if (isError(lastArg)) {
+        msgArgs = [...args.slice(0, -1), lastArg.message];
+    }
+
     const record = {
         ...(bindings ?? {}),
         time: new Date().toISOString(),
         level: prefix ? prefix.toLowerCase() : "info",
         tag,
-        msg: util.format(...args),
+        msg: util.format(...msgArgs),
     };
     if (pid) {
         record.pid = process.pid;
     }
-
-    const error = args.find(isError);
     if (error) {
         record.err = error;
     }
