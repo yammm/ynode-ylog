@@ -4,6 +4,12 @@
     "description": "Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with Fastify or standalone.",
     "main": "src/plugin.js",
     "types": "index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./index.d.ts",
+            "default": "./src/plugin.js"
+        }
+    },
     "type": "module",
     "license": "MIT",
     "author": "Michael Welter <me@mikinho.com>",
@@ -28,7 +34,7 @@
         "syslog"
     ],
     "engines": {
-        "node": ">=20"
+        "node": ">=20.19.0"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
