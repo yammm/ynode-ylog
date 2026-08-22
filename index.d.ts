@@ -41,6 +41,11 @@ export interface YlogOptions {
      * @default true
      */
     sanitize?: boolean;
+
+    /**
+     * Explicit tag overriding the module-derived name.
+     */
+    tag?: string;
 }
 
 export interface ChildLoggerOptions {

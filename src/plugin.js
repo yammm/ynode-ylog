@@ -381,10 +381,13 @@ class Log {
      * @param {object} [options] - Logger options.
      * @param {string} [options.level] - Named log level (silent|fatal|error|warn|info|debug|trace|verbose).
      * @param {boolean} [options.pid] - Include process PID in output.
-     * @param {"text"|"json"} [options.format="text"] - Output format.
+     * @param {"text"|"json"} [options.format="text"] - Output format. `json: true`
+     *   is accepted as an alias for `format: "json"`.
+     * @param {boolean} [options.json] - Alias for `format: "json"`.
      * @param {object} [options.bindings] - Static bindings for every log line.
      * @param {boolean} [options.sanitize=true] - Escape control characters in
      *   text-mode messages and binding values to prevent log-line forgery.
+     * @param {string} [options.tag] - Explicit tag overriding the module-derived name.
      */
     constructor(mod, options = {}) {
         const normalizedOptions = options && typeof options === "object" ? options : {};
@@ -394,7 +397,12 @@ class Log {
                 ? fileURLToPath(mod.url)
                 : null);
 
-        this.tag = moduleFilename ? path.basename(moduleFilename, ".js") : "unknown";
+        this.tag =
+            typeof normalizedOptions.tag === "string" && normalizedOptions.tag
+                ? normalizedOptions.tag
+                : moduleFilename
+                  ? path.basename(moduleFilename, ".js")
+                  : "unknown";
         this.pid = normalizedOptions.pid ?? false;
         this.format =
             normalizedOptions.format === "json" || normalizedOptions.json === true
@@ -591,27 +599,29 @@ class Log {
      * @returns {Log} A new logger instance.
      */
     child(bindings, options = {}) {
-        const child = Object.create(Log.prototype);
-        child.tag = this.tag;
-        child.pid = this.pid;
-        child.format = this.format;
-        child.sanitize = this.sanitize;
-        child._levelOverrideName = this._levelOverrideName;
-        child._levelOverride = this._levelOverride;
-        child.throttle = this.throttle;
-        if (options && typeof options === "object" && Object.hasOwn(levels, options.level)) {
-            child._levelOverrideName = options.level;
-            child._levelOverride = levels[options.level];
-        }
-        if (options && typeof options === "object" && options.format === "json") {
-            child.format = "json";
-        } else if (options && typeof options === "object" && options.format === "text") {
-            child.format = "text";
-        }
+        const childOptions = options && typeof options === "object" ? options : {};
         const childBindings = normalizeBindings(bindings);
-        child.bindings = childBindings
-            ? { ...(this.bindings ?? {}), ...childBindings }
-            : (this.bindings ?? null);
+
+        // Route through the constructor so new constructor fields are never
+        // silently dropped from derived loggers.
+        const child = new Log(null, {
+            tag: this.tag,
+            pid: this.pid,
+            format:
+                childOptions.format === "json" || childOptions.format === "text"
+                    ? childOptions.format
+                    : this.format,
+            level: Object.hasOwn(levels, childOptions.level)
+                ? childOptions.level
+                : (this._levelOverrideName ?? undefined),
+            sanitize: this.sanitize,
+            bindings: childBindings
+                ? { ...(this.bindings ?? {}), ...childBindings }
+                : (this.bindings ?? undefined),
+        });
+
+        // Children share their parent's throttle budget by contract.
+        child.throttle = this.throttle;
         return child;
     }
 }
