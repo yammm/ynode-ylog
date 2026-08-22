@@ -153,6 +153,15 @@ class ErrorThrottle {
 const isError = (x) => x instanceof Error;
 
 /**
+ * Returns true when a log call carries no meaningful payload — either no
+ * arguments at all or a sole null/undefined argument.
+ * @param {Array<*>} args - Arguments passed to a log method.
+ * @returns {boolean}
+ */
+const isEmptyLogCall = (args) =>
+    !args.length || (args.length === 1 && (args[0] === null || args[0] === undefined));
+
+/**
  * Returns true when a value is an object suitable for log bindings.
  * @param {*} value - Candidate binding object.
  * @returns {boolean}
@@ -557,7 +566,7 @@ class Log {
         if (level > this.levelValue) {
             return;
         }
-        if (!args.length || (args.length === 1 && (args[0] === null || args[0] === undefined))) {
+        if (isEmptyLogCall(args)) {
             return;
         }
 
@@ -571,7 +580,7 @@ class Log {
 
     /** FATAL output on stderr in magenta. Fatal messages are never throttled. @param {...*} args */
     fatal(...args) {
-        if (!args.length || (args.length === 1 && (args[0] === null || args[0] === undefined))) {
+        if (isEmptyLogCall(args)) {
             return;
         }
         this.log("FATAL", levels.error, args, colors.magenta);
