@@ -334,6 +334,35 @@ describe("structured logging and context", () => {
         assert.match(record.err.message, /json-error/);
     });
 
+    test("format json protects core fields from user bindings", async (t) => {
+        const lines = [];
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => lines.push(line);
+
+        const log = ylog(
+            { filename: "core-fields.js" },
+            {
+                format: "json",
+                pid: true,
+                bindings: { time: "fake-time", level: "fake-level", tag: "fake-tag" },
+            },
+        );
+
+        await ylog.withContext({ msg: "fake-msg", pid: "fake-pid" }, async () => {
+            log.info("real message");
+        });
+
+        const record = JSON.parse(lines[0]);
+        assert.match(record.time, /^\d{4}-\d{2}-\d{2}T/, "time must not be overwritten");
+        assert.strictEqual(record.level, "info");
+        assert.strictEqual(record.tag, "core-fields");
+        assert.strictEqual(record.msg, "real message");
+        assert.strictEqual(record.pid, process.pid);
+    });
+
     test("format json keeps the error stack solely in the err field", (t) => {
         const lines = [];
         const originalError = console.error;
