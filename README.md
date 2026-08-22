@@ -72,7 +72,7 @@ requestLog.error("Request failed");
 
 ## Structured Output and Request Context
 
-Set `format: "json"` to emit one JSON object per log call. Static logger bindings and active async context bindings are added as top-level fields, with core fields such as `time`, `level`, `tag`, `msg`, and enabled `pid` output protected from being overwritten.
+Set `format: "json"` (or its shorthand alias `json: true`) to emit one JSON object per log call. Static logger bindings and active async context bindings are added as top-level fields, with core fields such as `time`, `level`, `tag`, `msg`, and enabled `pid` output protected from being overwritten.
 
 ```javascript
 const log = ylog(import.meta, {

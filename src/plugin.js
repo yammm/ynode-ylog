@@ -2,7 +2,7 @@
  * Helper module for outputting colored info, warn, error, debug and trace/
  * verbose log messages. Works with Fastify or standalone
  *
- * @module log
+ * @module @ynode/ylog
  *
  * @example
  *
