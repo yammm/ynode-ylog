@@ -1,4 +1,6 @@
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 
 import ylog from "../src/plugin.js";
@@ -840,6 +842,27 @@ describe("factory static methods", () => {
         assert.throws(() => ylog.loglevel("__proto__"), TypeError);
         assert.throws(() => ylog.loglevel("wran"), /unknown log level: wran/);
         assert.strictEqual(ylog.defaultLevel, ylog.levels.warn);
+    });
+
+    test("default level resolves from the environment lazily, not at import", () => {
+        const pluginPath = fileURLToPath(new URL("../src/plugin.js", import.meta.url));
+        const script = [
+            `const { default: ylog } = await import(${JSON.stringify(pluginPath)});`,
+            'process.env.NODE_ENV = "production";',
+            "console.log(ylog.defaultLevel);",
+        ].join("\n");
+
+        const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+            encoding: "utf8",
+            env: { ...process.env, NODE_ENV: "development" },
+        });
+
+        assert.strictEqual(result.status, 0, result.stderr);
+        assert.strictEqual(
+            Number(result.stdout.trim()),
+            ylog.levels.info,
+            "NODE_ENV set after import must still govern the default level",
+        );
     });
 
     test("disableSyslogPrefix returns the factory for chaining", () => {

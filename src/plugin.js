@@ -62,9 +62,23 @@ const syslogPrefix = {
     4: "<7>",
 };
 
-let appLogLevelName = process.env.NODE_ENV !== "production" ? "debug" : "info";
-let appLogLevel = levels[appLogLevelName];
+// Resolved lazily on first use so environment configuration loaded after
+// import (for example via dotenv) is still respected.
+let appLogLevelName = null;
+let appLogLevel = null;
 let useSyslogPrefix = true;
+
+/**
+ * Resolves the global default level from the environment on first use.
+ * @returns {void}
+ */
+const ensureGlobalLevel = () => {
+    if (appLogLevel !== null) {
+        return;
+    }
+    appLogLevelName = process.env.NODE_ENV !== "production" ? "debug" : "info";
+    appLogLevel = levels[appLogLevelName];
+};
 const contextStore = new AsyncLocalStorage();
 
 // copying here to restrict colors and optimize speed
@@ -420,7 +434,11 @@ class Log {
 
     /** Numeric threshold used internally for level comparisons. @returns {number} */
     get levelValue() {
-        return this._levelOverride ?? appLogLevel;
+        if (this._levelOverride !== null) {
+            return this._levelOverride;
+        }
+        ensureGlobalLevel();
+        return appLogLevel;
     }
 
     /**
@@ -430,7 +448,11 @@ class Log {
      * @returns {string}
      */
     get level() {
-        return this._levelOverrideName ?? appLogLevelName;
+        if (this._levelOverrideName !== null) {
+            return this._levelOverrideName;
+        }
+        ensureGlobalLevel();
+        return appLogLevelName;
     }
 
     /**
@@ -688,7 +710,10 @@ createLogger.levels = levels;
  */
 Object.defineProperty(createLogger, "defaultLevel", {
     enumerable: true,
-    get: () => appLogLevel,
+    get: () => {
+        ensureGlobalLevel();
+        return appLogLevel;
+    },
 });
 
 /**
