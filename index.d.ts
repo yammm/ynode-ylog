@@ -34,6 +34,13 @@ export interface YlogOptions {
      * Static fields included with every log line.
      */
     bindings?: LogBindings;
+
+    /**
+     * Escape control characters in text-mode messages and binding values to
+     * prevent log-line forgery and terminal escape injection.
+     * @default true
+     */
+    sanitize?: boolean;
 }
 
 export interface ChildLoggerOptions {

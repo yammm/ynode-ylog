@@ -332,6 +332,40 @@ const bracket = (s, start = "[", end = "]") => {
     return s ? `${start}${s}${end}` : "";
 };
 
+/**
+ * C0 control characters plus DEL. A CR/LF in untrusted data would forge whole
+ * log lines (including fake syslog severity prefixes) and an ESC would inject
+ * terminal escape sequences, so all of them are escaped before writing.
+ */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point here
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+
+/**
+ * Escapes a single control character as a readable backslash sequence.
+ * @param {string} char - Matched control character.
+ * @returns {string} Escaped representation.
+ */
+const escapeControlChar = (char) => {
+    if (char === "\n") {
+        return "\\n";
+    }
+    if (char === "\r") {
+        return "\\r";
+    }
+    if (char === "\t") {
+        return "\\t";
+    }
+    return `\\x${char.codePointAt(0).toString(16).padStart(2, "0")}`;
+};
+
+/**
+ * Neutralizes control characters in text-mode output so untrusted values
+ * cannot forge log lines or inject terminal escapes.
+ * @param {*} value - Value to render into a text log line.
+ * @returns {string} String with control characters escaped.
+ */
+const sanitizeControlChars = (value) => String(value).replace(CONTROL_CHARS, escapeControlChar);
+
 class Log {
     /**
      * @param {object} mod - Module metadata (import.meta or { filename/url }).
@@ -340,6 +374,8 @@ class Log {
      * @param {boolean} [options.pid] - Include process PID in output.
      * @param {"text"|"json"} [options.format="text"] - Output format.
      * @param {object} [options.bindings] - Static bindings for every log line.
+     * @param {boolean} [options.sanitize=true] - Escape control characters in
+     *   text-mode messages and binding values to prevent log-line forgery.
      */
     constructor(mod, options = {}) {
         const normalizedOptions = options && typeof options === "object" ? options : {};
@@ -360,6 +396,7 @@ class Log {
             : null;
         this._levelOverride =
             this._levelOverrideName === null ? null : levels[this._levelOverrideName];
+        this.sanitize = normalizedOptions.sanitize !== false;
         this.throttle = new ErrorThrottle();
         this.bindings = normalizeBindings(normalizedOptions.bindings);
     }
@@ -452,13 +489,18 @@ class Log {
         if (activeBindings) {
             const parts = [];
             for (const [k, v] of Object.entries(activeBindings)) {
-                parts.push(`${k}=${v}`);
+                parts.push(
+                    this.sanitize
+                        ? `${sanitizeControlChars(k)}=${sanitizeControlChars(v)}`
+                        : `${k}=${v}`,
+                );
             }
             if (parts.length) {
                 message.push(bracket(parts.join(" ")));
             }
         }
-        message.push(util.format(...args));
+        const formatted = util.format(...args);
+        message.push(this.sanitize ? sanitizeControlChars(formatted) : formatted);
 
         console[stdio](message.join(" "));
     }
@@ -544,6 +586,7 @@ class Log {
         child.tag = this.tag;
         child.pid = this.pid;
         child.format = this.format;
+        child.sanitize = this.sanitize;
         child._levelOverrideName = this._levelOverrideName;
         child._levelOverride = this._levelOverride;
         child.throttle = this.throttle;

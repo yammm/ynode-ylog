@@ -97,6 +97,8 @@ TTY output includes a local timestamp and uses colors when the destination strea
 
 Call `ylog.disableSyslogPrefix()` before logging when a non-TTY destination should receive plain output instead. The setting is process-wide and affects existing and future loggers.
 
+In text mode, control characters in messages and binding values are escaped by default (`\n`, `\r`, `\t`, and `\xNN` for the rest), so untrusted data cannot forge log lines or inject terminal escape sequences. Pass `sanitize: false` to disable the escaping for a logger. JSON output is always safe because `JSON.stringify` escapes control characters itself.
+
 ## License
 
 [MIT](./LICENSE)

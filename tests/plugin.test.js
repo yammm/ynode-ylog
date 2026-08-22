@@ -219,6 +219,70 @@ describe("basic logging", () => {
     });
 });
 
+describe("control character sanitization", () => {
+    test("escapes a newline-forging attempt in message arguments", (t) => {
+        const log = ylog({ filename: "sanitize.js" });
+        let captured = "";
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = line;
+        };
+
+        log.info("user input\n<3> forged: something failed");
+
+        assert.ok(!captured.includes("\n"), `output must stay a single line, got: ${captured}`);
+        assert.ok(
+            captured.includes("user input\\n<3> forged"),
+            `expected escaped newline, got: ${captured}`,
+        );
+    });
+
+    test("escapes control characters in binding keys and values", (t) => {
+        const log = ylog({ filename: "sanitize.js" });
+        let captured = "";
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = line;
+        };
+
+        log.child({ reqId: "abc\r\ndef", note: "esc\u001b[31mred" }).info("hello");
+
+        assert.ok(!captured.includes("\n"));
+        assert.ok(!captured.includes("\r"));
+        assert.ok(!captured.includes("\u001b"));
+        assert.ok(
+            captured.includes("reqId=abc\\r\\ndef"),
+            `expected escaped CRLF, got: ${captured}`,
+        );
+        assert.ok(
+            captured.includes("note=esc\\x1b[31mred"),
+            `expected escaped ESC, got: ${captured}`,
+        );
+    });
+
+    test("sanitize false disables control character escaping", (t) => {
+        const log = ylog({ filename: "sanitize.js" }, { sanitize: false });
+        let captured = "";
+        const originalLog = console.log;
+        t.after(() => {
+            console.log = originalLog;
+        });
+        console.log = (line) => {
+            captured = line;
+        };
+
+        log.info("multi\nline");
+
+        assert.ok(captured.includes("multi\nline"));
+    });
+});
+
 describe("structured logging and context", () => {
     test("format json emits a parseable structured record", (t) => {
         const lines = [];
