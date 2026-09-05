@@ -62,13 +62,17 @@
         "format:check": "prettier --check .",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "ver:preview": "npx autover --no-amend --dry-run --short",
-        "ver:apply": "npx autover --guard-unchanged --short",
+        "ver:preview": "npx --no-install autover --no-amend --dry-run --short",
+        "ver:apply": "npx --no-install autover --guard-unchanged --short",
         "test": "node --test",
         "test:types": "tsc -p type-tests/tsconfig.json",
-        "test:staged": "eslint --no-warn-ignored $(git diff --cached --name-only --diff-filter=ACMRTUXB | tr '\\n' ' ')",
+        "test:staged": "node scripts/check-staged.mjs --lint-only",
         "prepublishOnly": "npm run format:check && npm run lint && npm test && npm run test:types && npm run docs",
-        "postversion": "git push && git push --tags"
+        "test:hooks": "node --test tests/check-staged.test.js tests/release.test.js",
+        "release:check": "node scripts/verify-release.mjs",
+        "release:patch": "node scripts/prepare-release.mjs patch",
+        "release:minor": "node scripts/prepare-release.mjs minor",
+        "release:major": "node scripts/prepare-release.mjs major"
     },
     "publishConfig": {
         "access": "public"
@@ -79,5 +83,6 @@
         "README.md",
         "CHANGELOG.md",
         "LICENSE"
-    ]
+    ],
+    "packageManager": "npm@11.17.0"
 }

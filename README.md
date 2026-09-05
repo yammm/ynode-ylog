@@ -6,6 +6,10 @@ Copyright (c) 2026 Michael Welter <me@mikinho.com>
 
 Helper module for outputting colored info, warn, error, debug and trace/verbose log messages. Works with [Fastify](https://www.fastify.io/) or standalone Node.js application.
 
+## Node.js support
+
+This package requires Node.js 20.19.0 or newer. CI exercises the exact 20.19.0, 22.13.0, and 24.0.0 boundaries. Node.js 20 remains tested only to preserve the current major-version contract even though upstream support has ended; use Node.js 22 or 24 for supported production deployments. A newly released Node.js major is not considered supported until it is added to CI, even when the open `engines` range admits it.
+
 ## Installation
 
 ```bash
