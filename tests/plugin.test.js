@@ -1296,7 +1296,7 @@ describe("factory static methods", () => {
         const script = [
             `const { default: ylog } = await import(${JSON.stringify(pluginPath)});`,
             'process.env.NODE_ENV = "production";',
-            "console.log(ylog.defaultLevel);",
+            "process.stdout.write(String(ylog.defaultLevel));",
         ].join("\n");
 
         const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
