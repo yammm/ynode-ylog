@@ -17,6 +17,7 @@ log.error(new Error("boom"), "request failed");
 log.info({ orderId: "ord-123", elapsedMs: 17 }, "processed %d item", 1);
 
 const child: Logger = log.child({ requestId: "abc" }, { level: "warn" });
+const inheritedChild: Logger = log.child({}, { level: "" });
 const unthrottled: Logger = ylog(import.meta, { throttle: false });
 const contextResult: Promise<number> = ylog.withContext({ requestId: "abc" }, async () => 42);
 const throttleDecision = new ylog.ErrorThrottle(1, 100).check("types");
@@ -25,9 +26,14 @@ const throttleDecision = new ylog.ErrorThrottle(1, 100).check("types");
 log.level = "wran";
 // @ts-expect-error Constructor options accept only known level names.
 ylog(import.meta, { level: "nope" });
+// @ts-expect-error Empty levels are accepted only for child inheritance.
+ylog(import.meta, { level: "" });
+// @ts-expect-error Nonempty unknown child levels remain invalid.
+log.child({}, { level: "wran" });
 
 void currentLevel;
 void child;
+void inheritedChild;
 void unthrottled;
 void contextResult;
 void throttleDecision;

@@ -98,8 +98,8 @@ export interface YlogOptions {
 }
 
 export interface ChildLoggerOptions {
-    /** Optional log-level override for the derived logger. */
-    level?: LogLevel;
+    /** Optional log-level override; an empty string inherits the parent's level policy. */
+    level?: LogLevel | "";
 
     /** Optional output-format override for the derived logger. */
     format?: LogFormat;

@@ -991,7 +991,7 @@ class Log {
      * @param {object} [bindings] - Key/value pairs rendered as `[k=v ...]` on
      *   every log line. Omitted or empty produces an unbound child.
      * @param {object} [options] - Fastify/Pino child logger options.
-     * @param {string} [options.level] - Optional child-specific log level.
+     * @param {string} [options.level] - Optional child-specific log level; an empty string inherits the parent.
      * @returns {Log} A new logger instance.
      */
     child(bindings, options = {}) {
@@ -1008,7 +1008,7 @@ class Log {
                     ? childOptions.format
                     : this.format,
             level:
-                childOptions.level === undefined
+                childOptions.level === undefined || childOptions.level === ""
                     ? (this._levelOverrideName ?? undefined)
                     : childOptions.level,
             sanitize: this.sanitize,

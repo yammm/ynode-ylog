@@ -142,6 +142,26 @@ describe("basic logging", () => {
         assert.strictEqual(errors.length, 1);
     });
 
+    test("child inherits an explicit parent level when Fastify supplies an empty level", () => {
+        const log = ylog({ filename: "test.js" }, { level: "debug" });
+        const child = log.child({ reqId: "empty-level" }, { level: "" });
+
+        assert.strictEqual(child.level, "debug");
+        assert.strictEqual(child.child({}, { level: "" }).level, "debug");
+        assert.strictEqual(log.level, "debug");
+    });
+
+    test("an empty child level preserves live global-level inheritance", (t) => {
+        t.after(restoreDefaultLevel);
+        ylog.loglevel("info");
+        const log = ylog({ filename: "test.js" });
+        const child = log.child({}, { level: "" });
+
+        assert.strictEqual(child.level, "info");
+        ylog.loglevel("debug");
+        assert.strictEqual(child.level, "debug");
+    });
+
     test("child accepts Fastify/Pino fatal and trace level aliases", (t) => {
         const log = ylog({ filename: "test.js" }, { level: "error" });
         const output = [];
@@ -693,6 +713,8 @@ describe("log level option", () => {
 
         const log = ylog({ filename: "invalid-child.js" }, { level: "debug" });
         assert.throws(() => log.child({}, { level: "wran" }), TypeError);
+        assert.throws(() => log.child({}, { level: " " }), TypeError);
+        assert.throws(() => ylog({ filename: "invalid-constructor.js" }, { level: "" }), TypeError);
     });
 
     test("assigning an invalid level name throws and keeps the current level", () => {

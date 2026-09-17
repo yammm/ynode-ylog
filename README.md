@@ -69,6 +69,8 @@ The `silent()` no-op method is provided for Fastify/Pino logger compatibility.
 
 `child(bindings, options)` composes contextual bindings and honors Fastify/Pino child options such as a route-specific `level`.
 
+An omitted or empty child `level` inherits the parent's level policy, including live global-level changes when the parent has no explicit override. Other invalid level names still throw.
+
 ```javascript
 const requestLog = log.child({ reqId: "abc123" }, { level: "error" });
 requestLog.error("Request failed");
